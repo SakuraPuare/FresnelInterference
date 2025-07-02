@@ -36,10 +36,18 @@ int main()
     bool success;
 
     // Looping over all the images in the directory
-    for (int i{0}; i < 10; i++)
+    int captured_count = 0;
+    while (captured_count < 10)
     {
-        cv::waitKey();
         cam >> frame;
+
+        if (frame.empty())
+        {
+            std::cerr << "Failed to capture frame from camera. Retrying..." << std::endl;
+            cv::waitKey(100); // Wait a bit before retrying
+            continue;
+        }
+        
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
         // Finding checker board corners
@@ -53,6 +61,7 @@ int main()
     */
         if (success)
         {
+            std::cout << "Checkerboard found, capturing." << std::endl;
             cv::TermCriteria criteria(cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 30, 0.001);
 
             // refining pixel coordinates for given 2d points.
@@ -63,10 +72,14 @@ int main()
 
             objpoints.push_back(objp);
             imgpoints.push_back(corner_pts);
+            captured_count++;
         }
 
         cv::imshow("Image", frame);
-        cv::waitKey(0);
+        
+        // Press 'q' to quit, any other key to continue
+        if (cv::waitKey(1) == 'q')
+            break;
     }
 
     cv::destroyAllWindows();
