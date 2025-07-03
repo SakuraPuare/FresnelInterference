@@ -85,14 +85,19 @@ bool MVCameraInput::init()
 
 cv::Mat MVCameraInput::read()
 {
+    // 性能优化：避免频繁的相机调用
+    if (isCacheValid()) {
+        return m_cachedFrame.clone();
+    }
+    
     tSdkFrameHead           sFrameInfo;        //输入图像的帧头信息
     BYTE*                   pbyBuffer;         //输出图像数据的缓冲区地址
     CameraSdkStatus         status;
 
     cv::Mat matImg;
 
-    // 第四个参数为超时时间，单位为ms
-    if (CameraGetImageBuffer(hCamera, &sFrameInfo, &pbyBuffer, 100) == CAMERA_STATUS_SUCCESS) 
+    // 第四个参数为超时时间，单位为ms - 减少超时时间以提高响应性
+    if (CameraGetImageBuffer(hCamera, &sFrameInfo, &pbyBuffer, 50) == CAMERA_STATUS_SUCCESS) 
     {
         status = CameraImageProcess(hCamera, pbyBuffer, g_pRgbBuffer, &sFrameInfo);
 
@@ -103,17 +108,17 @@ cv::Mat MVCameraInput::read()
             CameraFlipFrameBuffer(g_pRgbBuffer, &sFrameInfo, 1);
 #endif
 
+            // 创建Mat时避免复制数据
             matImg = cv::Mat(
                 cv::Size(sFrameInfo.iWidth, sFrameInfo.iHeight),
                 sFrameInfo.uiMediaType == CAMERA_MEDIA_TYPE_MONO8 ? CV_8UC1 : CV_8UC3,
                 g_pRgbBuffer
             );
 
-            auto begin_timestamp = cv::getTickCount();
-
-            cv::resize(matImg, matImg, this->imgResolution);
-
-            auto elapsed_seconds = (cv::getTickCount() - begin_timestamp) / cv::getTickFrequency();
+            // 只在分辨率不匹配时才进行resize
+            if (matImg.size() != this->imgResolution) {
+                cv::resize(matImg, matImg, this->imgResolution);
+            }
         }
 
         //在成功调用CameraGetImageBuffer后，必须调用CameraReleaseImageBuffer来释放获得的buffer。

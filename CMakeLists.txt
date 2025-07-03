@@ -40,12 +40,14 @@ set(APP_HEADERS
 # 输入/输出(IO)源文件
 set(IO_SOURCES
     src/io/ImageInput.cpp
+    src/io/FrameManager.cpp
     src/io/MVCameraInput.cpp
     src/io/VideoInput.cpp
     src/io/StaticImageInput.cpp
 )
 set(IO_HEADERS
     src/io/ImageInput.h
+    src/io/FrameManager.h
     src/io/MVCameraInput.h
     src/io/VideoInput.h
     src/io/StaticImageInput.h

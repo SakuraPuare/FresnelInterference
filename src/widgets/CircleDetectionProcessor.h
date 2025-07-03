@@ -6,7 +6,7 @@
 
 enum class DetectionAlgorithm {
     Hough,
-    BinaryCenter
+    GeometricCenter
 };
 
 struct DetectionParams {
@@ -18,8 +18,13 @@ struct DetectionParams {
     int minRadius = 10;
     int maxRadius = 100;
     
-    // 二值化参数
+    // 二值化预处理开关和参数（用于Hough）
+    bool useBinaryPreprocessing = false;
     int binaryThresh = 128;
+    
+    // 几何中心算法参数
+    int geometricBinaryThresh = 128;
+    bool inverseGeometric = false;  // 是否反向二值化
 };
 
 struct DetectionResult {
@@ -53,7 +58,7 @@ public:
 private:
     // 检测算法模块
     void detectWithHough(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& outProcessedImage);
-    void detectWithBinary(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& outProcessedImage);
+    void detectWithGeometricCenter(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& outProcessedImage);
     
     // 图像预处理
     cv::Mat preprocessImage(const cv::Mat& input);

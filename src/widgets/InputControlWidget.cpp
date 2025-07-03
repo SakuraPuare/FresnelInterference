@@ -3,6 +3,7 @@
 #include "io/MVCameraInput.h"
 #include "io/VideoInput.h"
 #include "io/StaticImageInput.h"
+#include "io/FrameManager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -167,8 +168,15 @@ void InputControlWidget::updateFrame()
         return;
     }
     
-    cv::Mat frame = m_camera->read();
-    if (frame.empty()) {
+    // 性能优化：使用引用读取，减少内存拷贝
+    static uint64_t lastFrameSeq = 0;
+    uint64_t currentFrameSeq = m_camera->getFrameSequence();
+    
+    // 检查帧是否真的更新了
+    bool frameUpdated = (currentFrameSeq != lastFrameSeq);
+    
+    const cv::Mat& frameRef = m_camera->readRef();
+    if (frameRef.empty()) {
         // For video files, empty frame means end of video
         if (dynamic_cast<VideoInput*>(m_camera.get())) {
              emit logMessage("视频播放结束。");
@@ -177,18 +185,26 @@ void InputControlWidget::updateFrame()
         return;
     }
     
-    m_currentFrame = frame.clone();
-    
-    // Display raw image
-    m_currentPixmap = matToQPixmap(m_currentFrame);
-    if (!m_currentPixmap.isNull()) {
-        m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    // 只在帧真正更新时才进行处理
+    if (frameUpdated) {
+        // 使用FrameManager进行零拷贝帧管理
+        auto framePtr = FrameManager::getInstance().updateFrame(frameRef);
+        if (framePtr) {
+            m_currentFrame = framePtr->frame; // 保存本地引用用于显示
+            lastFrameSeq = currentFrameSeq;
+            
+            // Display raw image - 只在帧更新时重新渲染
+            m_currentPixmap = matToQPixmap(m_currentFrame);
+            if (!m_currentPixmap.isNull()) {
+                m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            }
+            
+            // Emit frame for analysis tabs - 现在分析模块可以从FrameManager获取帧
+            emit frameReady(m_currentFrame);
+        }
     }
     
-    // Emit frame for analysis tabs
-    emit frameReady(m_currentFrame);
-    
-    // Calculate and display FPS
+    // Calculate and display FPS - 即使帧没更新也要计算FPS
     m_frameCount++;
     qint64 currentTime = QTime::currentTime().msecsSinceStartOfDay();
     if (m_lastFrameTime == 0) {

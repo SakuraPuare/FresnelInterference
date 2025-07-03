@@ -28,6 +28,7 @@ class QChartView;
 class QScatterSeries;
 class QLineSeries;
 class QValueAxis;
+class QCheckBox;
 class QComboBox;
 class QStackedWidget;
 QT_END_NAMESPACE
@@ -39,7 +40,7 @@ class CircleDetectionWidget : public QWidget
 public:
     enum class DetectionAlgorithm {
         Hough,
-        BinaryCenter
+        GeometricCenter
     };
     Q_ENUM(DetectionAlgorithm)
 
@@ -88,18 +89,22 @@ private:
     QPushButton *m_startRecordButton, *m_clearRecordButton;
     QGroupBox *m_recordGroup, *m_analysisGroup;
     
-    // --- Algorithm Specific Controls ---
+    // --- Algorithm Selection ---
     QComboBox* m_algorithmSelector;
     QStackedWidget* m_paramsStack;
     QWidget* m_houghParamsWidget;
-    QWidget* m_binaryParamsWidget;
+    QWidget* m_geometricParamsWidget;
     
-    // Hough Params
-    QGroupBox* m_paramsGroup; // Note: This is the group for hough params
+    // --- Hough Algorithm Parameters ---
+    QGroupBox* m_houghParamsGroup;
     QSlider *m_dpSlider, *m_minDistSlider, *m_cannyThreshSlider, *m_centerThreshSlider, *m_minRadiusSlider, *m_maxRadiusSlider;
-
-    // Binary Params
+    QCheckBox* m_useBinaryCheckBox;
     QSlider* m_binaryThreshSlider;
+    
+    // --- Geometric Center Algorithm Parameters ---
+    QGroupBox* m_geometricParamsGroup;
+    QSlider* m_geometricBinaryThreshSlider;
+    QCheckBox* m_inverseGeometricCheckBox;
 
     // --- Test Controls ---
     QGroupBox* m_testGroup;

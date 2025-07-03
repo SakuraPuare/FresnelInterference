@@ -44,7 +44,17 @@ bool VideoInput::initUSBCamera()
 
 cv::Mat VideoInput::read()
 {
+    // 性能优化：避免频繁读取
+    if (isCacheValid()) {
+        return m_cachedFrame.clone();
+    }
+    
     origin >> tmp;
-    if (!tmp.empty()) cv::resize(tmp, tmp, imgResolution);
+    if (!tmp.empty()) {
+        // 只在分辨率不匹配时才进行resize
+        if (tmp.size() != imgResolution) {
+            cv::resize(tmp, tmp, imgResolution);
+        }
+    }
     return tmp;
 }

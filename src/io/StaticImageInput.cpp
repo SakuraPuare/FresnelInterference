@@ -19,5 +19,18 @@ cv::Mat StaticImageInput::read() {
     if (!this->opened) {
         return cv::Mat();
     }
-    return m_staticImage.clone();
+    
+    // 性能优化：静态图像天然适合缓存
+    if (isCacheValid()) {
+        return m_cachedFrame.clone();
+    }
+    
+    // 对于静态图像，缓存超时时间可以设置得很长
+    if (m_cachedFrame.empty()) {
+        m_cachedFrame = m_staticImage.clone();
+        m_lastReadTime = std::chrono::high_resolution_clock::now();
+        m_frameSequence++;
+    }
+    
+    return m_cachedFrame.clone();
 } 
