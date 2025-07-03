@@ -1,10 +1,19 @@
 #ifndef CIRCLE_DETECTION_WIDGET_H
 #define CIRCLE_DETECTION_WIDGET_H
 
+// --- Begin Qt Charts ---
+#include <QtCharts/QChartView>
+#include <QtCharts/QLineSeries>
+#include <QtCharts/QValueAxis>
+#include <QtCharts/QScatterSeries>
+// --- End Qt Charts ---
+
 #include <QWidget>
 #include <QPixmap>
 #include <QResizeEvent>
 #include <opencv2/opencv.hpp>
+#include <QList>
+#include <QPointF>
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -12,7 +21,15 @@ class QPushButton;
 class QSlider;
 class QTextEdit;
 class QGroupBox;
+class QChartView;
+class QScatterSeries;
 QT_END_NAMESPACE
+
+struct CircleData {
+    double x;
+    double y;
+    double radius;
+};
 
 class CircleDetectionWidget : public QWidget
 {
@@ -31,13 +48,18 @@ private slots:
     void startDetection();
     void stopDetection();
     void onParamsChanged();
+    void startRecording();
+    void clearRecording();
+    void updateStaticImageOffset(int);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
     void setupUI();
+    void updatePlotsAxes();
     QPixmap matToQPixmap(const cv::Mat& mat);
+    void applyOffsetAndDetect();
     cv::Mat performDetection(const cv::Mat& frame);
 
     // UI
@@ -53,9 +75,30 @@ private:
     QSlider* m_minRadiusSlider;
     QSlider* m_maxRadiusSlider;
 
+    // --- New UI elements for recording and plotting ---
+    QGroupBox* m_recordGroup;
+    QPushButton* m_startRecordButton;
+    QPushButton* m_clearRecordButton;
+    QChartView* m_plotViewX;
+    QChartView* m_plotViewY;
+
+    QGroupBox* m_testGroup;
+    QSlider* m_offsetXSlider;
+    QSlider* m_offsetYSlider;
+    QLabel* m_offsetLabel;
+    // --- End New UI ---
+
     // State
     bool m_isDetectionActive;
     QPixmap m_currentPixmap;
+    cv::Mat m_originalFrame;
+
+    // --- New state variables ---
+    bool m_isRecording;
+    QPoint m_staticImageOffset;
+    QScatterSeries* m_seriesXR;
+    QScatterSeries* m_seriesYR;
+    QList<CircleData> m_recordedData;
 };
 
 #endif // CIRCLE_DETECTION_WIDGET_H 

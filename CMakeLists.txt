@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 查找Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Charts)
 
 # 查找OpenCV
 find_package(OpenCV REQUIRED)
@@ -64,11 +64,6 @@ set(WIDGET_HEADERS
     src/widgets/ImageSpacingWidget.h
 )
 
-# UI文件
-# set(UI_FILES
-#     src/MainWindow.ui
-# )
-
 # 创建可执行文件
 add_executable(FresnelInterference
     ${APP_SOURCES}
@@ -77,7 +72,6 @@ add_executable(FresnelInterference
     ${IO_HEADERS}
     ${WIDGET_SOURCES}
     ${WIDGET_HEADERS}
-    # ${UI_FILES}
 )
 
 # 链接库
@@ -85,6 +79,7 @@ target_link_libraries(FresnelInterference
     Qt6::Core
     Qt6::Widgets
     Qt6::Gui
+    Qt6::Charts
     ${OpenCV_LIBS}
     MVSDK  # MindVision相机SDK
 )
