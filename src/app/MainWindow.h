@@ -37,6 +37,12 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+signals:
+    void pixelSizeChanged(double pixelSize_um);
+
+private slots:
+    void openPixelSizeDialog();
+
 private:
     void setupUI();
     void setupMenuBar();
@@ -56,12 +62,16 @@ private:
     QAction* m_exitAction;
     QAction* m_aboutAction;
     QAction* m_resetAction;
+    QAction* m_pixelSizeAction;
 
     // Tab Widgets
     InputControlWidget* m_inputControlWidget;
     CircleDetectionWidget* m_circleDetectionWidget;
     FringeAnalysisWidget* m_fringeAnalysisWidget;
     ImageSpacingWidget* m_imageSpacingWidget;
+
+    // Global Settings
+    double m_pixelSize_um;
 };
 
 #endif // MAINWINDOW_H

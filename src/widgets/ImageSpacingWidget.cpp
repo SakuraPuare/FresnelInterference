@@ -7,173 +7,495 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QTextEdit>
-#include <QDoubleSpinBox>
+#include <QSlider>
+#include <QCheckBox>
+#include <QTimer>
 
 #include <opencv2/imgproc.hpp>
+#include <vector>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
+
+// Shifts the quadrants of a Fourier image so the origin is at the center
+static void fftshift(cv::Mat &mag) {
+    int cx = mag.cols / 2;
+    int cy = mag.rows / 2;
+
+    cv::Mat q0(mag, cv::Rect(0, 0, cx, cy));
+    cv::Mat q1(mag, cv::Rect(cx, 0, cx, cy));
+    cv::Mat q2(mag, cv::Rect(0, cy, cx, cy));
+    cv::Mat q3(mag, cv::Rect(cx, cy, cx, cy));
+
+    cv::Mat tmp;
+    q0.copyTo(tmp);
+    q3.copyTo(q0);
+    tmp.copyTo(q3);
+
+    q1.copyTo(tmp);
+    q2.copyTo(q1);
+    tmp.copyTo(q2);
+}
+
+// Helper to find the two strongest peaks that are separated by a minimum distance
+static void findTwoStrongestPeaks(const std::vector<float>& data, float threshold, int min_dist, std::vector<int>& peak_indices) {
+    peak_indices.clear();
+    
+    std::vector<std::pair<float, int>> all_peaks;
+    for (int i = 1; i < (int)data.size() - 1; ++i) {
+        if (data[i] > data[i-1] && data[i] > data[i+1] && data[i] > threshold) {
+            all_peaks.push_back({data[i], i});
+        }
+    }
+
+    if (all_peaks.empty()) return;
+
+    // Sort by intensity (strongest first)
+    std::sort(all_peaks.rbegin(), all_peaks.rend());
+
+    // Add the strongest peak first
+    peak_indices.push_back(all_peaks[0].second);
+
+    // Find the next strongest peak that is far enough away
+    for (size_t i = 1; i < all_peaks.size(); ++i) {
+        if (std::abs(all_peaks[i].second - peak_indices[0]) >= min_dist) {
+            peak_indices.push_back(all_peaks[i].second);
+            break; // Found the second peak
+        }
+    }
+    
+    // Ensure we have two peaks and they are sorted by position
+    if (peak_indices.size() == 2) {
+        std::sort(peak_indices.begin(), peak_indices.end());
+    } else {
+        peak_indices.clear(); // Not enough valid peaks found
+    }
+}
 
 ImageSpacingWidget::ImageSpacingWidget(QWidget *parent)
     : QWidget(parent)
-    , m_isMeasurementActive(false)
+    , m_isFrozenForAnalysis(false)
+    , m_pixelSize_um(3.45)
 {
     setupUI();
+    
+    m_previewUpdateTimer = new QTimer(this);
+    m_previewUpdateTimer->setSingleShot(true);
+    m_previewUpdateTimer->setInterval(100); 
+
+    connect(m_toggleButton, &QPushButton::toggled, this, &ImageSpacingWidget::toggleFreezeMode);
+    
+    connect(m_brightnessSlider, &QSlider::valueChanged, this, &ImageSpacingWidget::scheduleReanalysis);
+    connect(m_contrastSlider, &QSlider::valueChanged, this, &ImageSpacingWidget::scheduleReanalysis);
+    connect(m_gammaSlider, &QSlider::valueChanged, this, &ImageSpacingWidget::scheduleReanalysis);
+    connect(m_peakThreshSlider, &QSlider::valueChanged, this, &ImageSpacingWidget::scheduleReanalysis);
+    connect(m_minPeakDistSlider, &QSlider::valueChanged, this, &ImageSpacingWidget::scheduleReanalysis);
+    connect(m_detectValleysCheck, &QCheckBox::toggled, this, &ImageSpacingWidget::scheduleReanalysis);
+
+    connect(m_previewUpdateTimer, &QTimer::timeout, this, [this]() {
+        if (m_isFrozenForAnalysis) {
+            performMeasurement();
+        } else {
+            updatePreviewImage();
+        }
+    });
+}
+
+ImageSpacingWidget::~ImageSpacingWidget()
+{
+    delete m_previewUpdateTimer;
+}
+
+void ImageSpacingWidget::setPixelSize(double pixelSize_um)
+{
+    m_pixelSize_um = pixelSize_um;
+    m_pixelSizeLabel->setText(QString("%1 μm").arg(m_pixelSize_um, 0, 'f', 2));
+    if (m_isFrozenForAnalysis) {
+        scheduleReanalysis();
+    }
 }
 
 void ImageSpacingWidget::setupUI()
 {
-    QHBoxLayout* layout = new QHBoxLayout(this);
+    QHBoxLayout* mainLayout = new QHBoxLayout(this);
     
-    // Image Display
-    QGroupBox* imageGroup = new QGroupBox("间距测量结果");
-    QVBoxLayout* imageLayout = new QVBoxLayout(imageGroup);
+    // Left Panel: Image Displays + Result Text
+    QVBoxLayout* leftPanelLayout = new QVBoxLayout();
     
-    m_imageLabel = new QLabel("等待输入图像...");
-    m_imageLabel->setMinimumSize(640, 480);
-    m_imageLabel->setFrameStyle(QFrame::Box);
-    m_imageLabel->setAlignment(Qt::AlignCenter);
-    m_imageLabel->setScaledContents(false);
-    m_imageLabel->setStyleSheet("QLabel { background-color: #2b2b2b; color: white; }");
-    imageLayout->addWidget(m_imageLabel);
+    QHBoxLayout* imageDisplayLayout = new QHBoxLayout();
+    QGroupBox* originalGroup = new QGroupBox("原始图像 / 冻结帧");
+    QVBoxLayout* originalLayout = new QVBoxLayout(originalGroup);
+    m_originalImageLabel = new QLabel("等待输入图像...");
+    m_originalImageLabel->setMinimumSize(400, 300);
+    m_originalImageLabel->setFrameStyle(QFrame::Box);
+    m_originalImageLabel->setAlignment(Qt::AlignCenter);
+    m_originalImageLabel->setStyleSheet("QLabel { background-color: #2b2b2b; color: white; }");
+    originalLayout->addWidget(m_originalImageLabel);
+    
+    QGroupBox* processedGroup = new QGroupBox("预处理与分析结果");
+    QVBoxLayout* processedLayout = new QVBoxLayout(processedGroup);
+    m_processedImageLabel = new QLabel("等待输入图像...");
+    m_processedImageLabel->setMinimumSize(400, 300);
+    m_processedImageLabel->setFrameStyle(QFrame::Box);
+    m_processedImageLabel->setAlignment(Qt::AlignCenter);
+    m_processedImageLabel->setStyleSheet("QLabel { background-color: #2b2b2b; color: white; }");
+    processedLayout->addWidget(m_processedImageLabel);
+    
+    imageDisplayLayout->addWidget(originalGroup);
+    imageDisplayLayout->addWidget(processedGroup);
+    
+    leftPanelLayout->addLayout(imageDisplayLayout);
     
     m_resultText = new QTextEdit();
     m_resultText->setMaximumHeight(100);
     m_resultText->setReadOnly(true);
     m_resultText->setStyleSheet("QTextEdit { background-color: #1e1e1e; color: #00ff00; }");
-    imageLayout->addWidget(m_resultText);
+    leftPanelLayout->addWidget(m_resultText);
     
-    layout->addWidget(imageGroup);
+    mainLayout->addLayout(leftPanelLayout, 4); 
     
-    // Control Panel
+    // Right Panel: Controls
     QVBoxLayout* controlLayout = new QVBoxLayout();
     
-    // Control Buttons
-    QGroupBox* controlGroup = new QGroupBox("间距测量控制");
+    QGroupBox* controlGroup = new QGroupBox("分析控制");
     QVBoxLayout* controlGroupLayout = new QVBoxLayout(controlGroup);
-    
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-    m_startButton = new QPushButton("开始测量");
-    m_stopButton = new QPushButton("停止测量");
-    m_stopButton->setEnabled(false);
-    buttonLayout->addWidget(m_startButton);
-    buttonLayout->addWidget(m_stopButton);
-    controlGroupLayout->addLayout(buttonLayout);
-    
+    m_toggleButton = new QPushButton("冻结帧并调参");
+    m_toggleButton->setCheckable(true);
+    controlGroupLayout->addWidget(m_toggleButton);
     controlLayout->addWidget(controlGroup);
     
-    // Parameters
-    m_paramsGroup = new QGroupBox("测量参数");
+    m_paramsGroup = new QGroupBox("分析参数");
     QFormLayout* paramsLayout = new QFormLayout(m_paramsGroup);
     
-    m_pixelSizeSpin = new QDoubleSpinBox();
-    m_pixelSizeSpin->setDecimals(3);
-    m_pixelSizeSpin->setRange(0.1, 50.0);
-    m_pixelSizeSpin->setSingleStep(0.1);
-    m_pixelSizeSpin->setValue(3.45);
-    paramsLayout->addRow("像素尺寸(μm):", m_pixelSizeSpin);
+    m_peakThreshSlider = new QSlider(Qt::Horizontal);
+    m_peakThreshSlider->setRange(1, 254); m_peakThreshSlider->setValue(50);
+    paramsLayout->addRow("亮/暗检测阈值:", m_peakThreshSlider);
+
+    m_minPeakDistSlider = new QSlider(Qt::Horizontal);
+    m_minPeakDistSlider->setRange(1, 200); m_minPeakDistSlider->setValue(20);
+    paramsLayout->addRow("最小特征间距(px):", m_minPeakDistSlider);
     
+    m_detectValleysCheck = new QCheckBox("检测暗条纹 (波谷)");
+    paramsLayout->addRow(m_detectValleysCheck);
+    
+    m_pixelSizeLabel = new QLabel(QString("%1 μm").arg(m_pixelSize_um, 0, 'f', 2));
+    paramsLayout->addRow("像素尺寸(全局):", m_pixelSizeLabel);
     controlLayout->addWidget(m_paramsGroup);
+
+    m_preprocessGroup = new QGroupBox("图像预处理");
+    QFormLayout* preprocessLayout = new QFormLayout(m_preprocessGroup);
+    m_brightnessSlider = new QSlider(Qt::Horizontal); m_brightnessSlider->setRange(-100, 100); m_brightnessSlider->setValue(0);
+    preprocessLayout->addRow("亮度:", m_brightnessSlider);
+    m_contrastSlider = new QSlider(Qt::Horizontal); m_contrastSlider->setRange(1, 200); m_contrastSlider->setValue(100);
+    preprocessLayout->addRow("对比度(x0.02):", m_contrastSlider);
+    m_gammaSlider = new QSlider(Qt::Horizontal); m_gammaSlider->setRange(10, 300); m_gammaSlider->setValue(100);
+    preprocessLayout->addRow("伽马(x0.01):", m_gammaSlider);
+    controlLayout->addWidget(m_preprocessGroup);
+    
     controlLayout->addStretch();
-    
-    layout->addLayout(controlLayout);
-    
-    // Connections
-    connect(m_startButton, &QPushButton::clicked, this, &ImageSpacingWidget::startMeasurement);
-    connect(m_stopButton, &QPushButton::clicked, this, &ImageSpacingWidget::stopMeasurement);
-    connect(m_pixelSizeSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ImageSpacingWidget::onParamsChanged);
+    mainLayout->addLayout(controlLayout, 1);
 }
 
 void ImageSpacingWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
+    if (m_originalFrame.empty()) return;
+
+    QPixmap originalPixmap;
+    if (m_isFrozenForAnalysis) {
+        originalPixmap = matToQPixmap(m_frozenFrame);
+    } else {
+        originalPixmap = matToQPixmap(m_originalFrame);
+    }
+    m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    
     if (!m_currentPixmap.isNull()) {
-        m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        m_processedImageLabel->setPixmap(m_currentPixmap.scaled(m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
 }
 
 void ImageSpacingWidget::processFrame(const cv::Mat& frame)
 {
-    if (m_isMeasurementActive && !frame.empty()) {
-        cv::Mat result = performMeasurement(frame);
-        m_currentPixmap = matToQPixmap(result);
-        if (!m_currentPixmap.isNull()) {
-            m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    if (m_isFrozenForAnalysis) {
+        return; // Ignore new frames when frozen
+    }
+    updateFrame(frame);
+}
+
+void ImageSpacingWidget::toggleFreezeMode(bool checked)
+{
+    m_isFrozenForAnalysis = checked;
+    m_toggleButton->setText(checked ? "返回实时预览" : "冻结帧并调参");
+
+    if (checked) {
+        if (m_originalFrame.empty()) {
+            m_resultText->setText("错误: 没有图像可以冻结。");
+            m_isFrozenForAnalysis = false;
+            m_toggleButton->setChecked(false);
+            return;
         }
+        m_frozenFrame = m_originalFrame.clone();
+        performMeasurement(); 
+    } else {
+        m_resultText->clear();
+        updateFrame(m_originalFrame); 
     }
 }
 
-void ImageSpacingWidget::startMeasurement()
-{
-    m_isMeasurementActive = true;
-    m_startButton->setEnabled(false);
-    m_stopButton->setEnabled(true);
-    emit logMessage("开始大小像间距测量");
+void ImageSpacingWidget::scheduleReanalysis() {
+    m_previewUpdateTimer->start();
 }
 
-void ImageSpacingWidget::stopMeasurement()
-{
-    m_isMeasurementActive = false;
-    m_startButton->setEnabled(true);
-    m_stopButton->setEnabled(false);
-    m_imageLabel->setText("间距测量已停止");
-    m_currentPixmap = QPixmap();
-    emit logMessage("停止间距测量");
+void ImageSpacingWidget::updateFrame(const cv::Mat &frame) {
+    if (frame.empty()) {
+        m_originalImageLabel->setText("无图像输入");
+        m_processedImageLabel->setText("无图像输入");
+        m_currentFrame.release();
+        m_originalFrame.release();
+        m_frozenFrame.release();
+        return;
+    }
+    
+    m_originalFrame = frame.clone(); 
+    if (m_originalFrame.channels() != 1) {
+        cv::cvtColor(m_originalFrame, m_originalFrame, cv::COLOR_BGR2GRAY);
+    }
+
+    QPixmap originalPixmap = matToQPixmap(m_originalFrame);
+     if(!originalPixmap.isNull()){
+        m_originalImageLabel->setPixmap(originalPixmap.scaled(
+            m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+    
+    updatePreviewImage();
 }
 
-void ImageSpacingWidget::onParamsChanged()
-{
-    // Can be used to trigger re-processing on param change if needed
+void ImageSpacingWidget::updatePreviewImage() {
+    if (m_originalFrame.empty()) { return; }
+
+    cv::Mat processedFrame;
+    applyPreprocessing(m_originalFrame, processedFrame);
+    
+    m_currentPixmap = matToQPixmap(processedFrame);
+    if(!m_currentPixmap.isNull()){
+        m_processedImageLabel->setPixmap(m_currentPixmap.scaled(
+            m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
 }
 
-cv::Mat ImageSpacingWidget::performMeasurement(const cv::Mat& frame)
+void ImageSpacingWidget::performMeasurement()
 {
-    cv::Mat gray, result = frame.clone();
-    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    if (m_frozenFrame.empty()) {
+        m_resultText->setText("错误：没有冻结的图像用于分析。");
+        return;
+    }
+
+    cv::Mat processedFrame;
+    applyPreprocessing(m_frozenFrame, processedFrame);
+    m_currentFrame = processedFrame.clone();
+
+    // --- Start: FFT-based Angle Detection ---
+    cv::Mat padded;
+    int m = cv::getOptimalDFTSize(m_currentFrame.rows);
+    int n = cv::getOptimalDFTSize(m_currentFrame.cols);
+    cv::copyMakeBorder(m_currentFrame, padded, 0, m - m_currentFrame.rows, 0, n - m_currentFrame.cols, cv::BORDER_CONSTANT, cv::Scalar::all(0));
     
-    cv::Mat edges;
-    cv::Canny(gray, edges, 50, 150);
+    cv::Mat planes[] = {cv::Mat_<float>(padded), cv::Mat::zeros(padded.size(), CV_32F)};
+    cv::Mat complexI;
+    cv::merge(planes, 2, complexI);
+    cv::dft(complexI, complexI);
+    cv::split(complexI, planes);
+    cv::magnitude(planes[0], planes[1], planes[0]);
+    cv::Mat magI = planes[0];
+    magI += cv::Scalar::all(1);
+    cv::log(magI, magI);
+    fftshift(magI);
     
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(edges, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    
-    cv::drawContours(result, contours, -1, cv::Scalar(0, 255, 0), 2);
-    
-    double pixelSize = m_pixelSizeSpin->value();
-    QString resultText = QString("像素尺寸: %1 μm\n").arg(pixelSize);
-    resultText += QString("检测到 %1 个轮廓\n").arg(contours.size());
-    
-    if (contours.size() >= 2) {
-        std::vector<std::pair<double, cv::Point2f>> areaCenters;
-        for (const auto& contour : contours) {
-            double area = cv::contourArea(contour);
-            if (area > 100) { // Filter small contours
-                cv::Moments m = cv::moments(contour);
-                if(m.m00 == 0) continue;
-                cv::Point2f center(m.m10/m.m00, m.m01/m.m00);
-                areaCenters.push_back({area, center});
-            }
+    // Find the angle of the lines from the spectrum
+    cv::Mat magI_clone = magI.clone();
+    int cx = magI_clone.cols / 2;
+    int cy = magI_clone.rows / 2;
+    // Zero out the center of the spectrum to ignore the DC component
+    cv::circle(magI_clone, cv::Point(cx, cy), 10, cv::Scalar(0), -1);
+
+    // --- New Robust Angle Detection using PCA ---
+    std::vector<cv::Point> locations;
+    double maxVal = 0.0;
+    cv::minMaxLoc(magI_clone, NULL, &maxVal, NULL, NULL);
+
+    double angle_deg;
+
+    // Only proceed if the signal is strong enough
+    if (maxVal > 1e-6) {
+        cv::Mat thresholded_mag;
+        // Threshold to get high-energy points
+        cv::threshold(magI_clone, thresholded_mag, maxVal * 0.5, 255, cv::THRESH_BINARY);
+        cv::findNonZero(thresholded_mag, locations);
+    }
+
+    // Use PCA if enough points are found, otherwise fallback to max location
+    if (locations.size() > 20) {
+        cv::Mat data_pts(locations.size(), 2, CV_64F);
+        for(size_t i = 0; i < locations.size(); i++) {
+            // Center the points around the spectrum's origin for PCA
+            data_pts.at<double>(i, 0) = locations[i].x - cx;
+            data_pts.at<double>(i, 1) = locations[i].y - cy;
         }
+
+        cv::PCA pca_analysis(data_pts, cv::Mat(), cv::PCA::DATA_AS_ROW);
+        // The first eigenvector is the direction of highest variance
+        cv::Point2f eigenvector(pca_analysis.eigenvectors.at<double>(0, 0), pca_analysis.eigenvectors.at<double>(0, 1));
+        angle_deg = atan2(eigenvector.y, eigenvector.x) * 180.0 / CV_PI;
+    } else {
+        // Fallback for weak signals or very few points
+        cv::Point maxLoc;
+        cv::minMaxLoc(magI_clone, NULL, NULL, NULL, &maxLoc);
+        angle_deg = atan2(maxLoc.y - cy, maxLoc.x - cx) * 180.0 / CV_PI;
+    }
+    // --- End of PCA-based detection ---
+
+    // Angle of the lines in the image is perpendicular to the angle in the frequency domain.
+    double line_angle_deg = angle_deg - 90.0; 
+
+    // The angle needed to rotate the image to make the lines vertical (target_angle = 90)
+    // is rotation = target_angle - current_angle
+    double rotation_angle = 90.0 - line_angle_deg;
+
+    // Normalize rotation to the shortest path, e.g., -90 to 90
+    if (rotation_angle > 90.0) rotation_angle -= 180.0;
+    if (rotation_angle < -90.0) rotation_angle += 180.0;
+
+    // For display, show a user-friendly angle (e.g., 0-180 degrees)
+    double display_angle = line_angle_deg;
+    if (display_angle < 0.0) display_angle += 180.0;
+
+    // --- End: FFT-based Angle Detection ---
+
+    cv::Mat rotatedFrame;
+    cv::Point2f center(m_currentFrame.cols / 2.0, m_currentFrame.rows / 2.0);
+    cv::Mat rot = cv::getRotationMatrix2D(center, rotation_angle, 1.0);
+    cv::warpAffine(m_currentFrame, rotatedFrame, rot, m_currentFrame.size(), cv::INTER_CUBIC, cv::BORDER_REPLICATE);
+
+    cv::Mat projection;
+    // Now that the lines are vertical, we project horizontally
+    cv::reduce(rotatedFrame, projection, 0, cv::REDUCE_AVG, CV_32F);
+
+    std::vector<float> proj_vec;
+    projection.row(0).copyTo(proj_vec);
+
+    if (m_detectValleysCheck->isChecked()) {
+        float max_val = *std::max_element(proj_vec.begin(), proj_vec.end());
+        for (auto &v : proj_vec) { v = max_val - v; }
+    }
+    
+    std::vector<int> peak_indices;
+    findTwoStrongestPeaks(proj_vec, m_peakThreshSlider->value(), m_minPeakDistSlider->value(), peak_indices);
+
+    QStringList results;
+    results << "分析结果 (冻结帧):\n";
+    results << QString("光斑倾斜角度: %1°\n").arg(display_angle, 0, 'f', 2);
+
+    if (peak_indices.size() == 2) {
+        double pixelDistance = std::abs(peak_indices[1] - peak_indices[0]);
+        double realDistance = pixelDistance * m_pixelSize_um;
         
-        if (areaCenters.size() >= 2) {
-            std::sort(areaCenters.begin(), areaCenters.end(), 
-                     [](const auto& a, const auto& b) { return a.first > b.first; });
-            
-            cv::Point2f center1 = areaCenters[0].second;
-            cv::Point2f center2 = areaCenters[1].second;
-            
-            cv::circle(result, center1, 5, cv::Scalar(255, 0, 0), -1);
-            cv::circle(result, center2, 5, cv::Scalar(255, 0, 0), -1);
-            cv::line(result, center1, center2, cv::Scalar(0, 0, 255), 2);
-            
-            double pixelDistance = cv::norm(center1 - center2);
-            double realDistance = pixelDistance * pixelSize;
-            
-            resultText += QString("像素距离: %1 像素\n").arg(pixelDistance, 0, 'f', 2);
-            resultText += QString("实际距离: %1 μm\n").arg(realDistance, 0, 'f', 2);
-        }
+        results << "检测到 2 个光斑\n";
+        results << QString("像素间距: %1 像素\n").arg(pixelDistance, 0, 'f', 2);
+        results << QString("物理间距: %1 μm\n").arg(realDistance, 0, 'f', 2);
+    } else {
+        results << "未能检测到2个足够强的光斑以计算间距。\n";
     }
     
-    m_resultText->setText(resultText);
-    return result;
+    m_resultText->setText(results.join(""));
+    
+    cv::Mat displayOriginal, displayProcessed;
+    cv::cvtColor(m_frozenFrame, displayOriginal, cv::COLOR_GRAY2BGR, 3);
+    cv::cvtColor(rotatedFrame, displayProcessed, cv::COLOR_GRAY2BGR); // Show the rotated image for verification
+    
+    // Draw results on both images
+    drawResult(displayOriginal, peak_indices, line_angle_deg);
+    // On the processed image, lines are now vertical, so we can draw them with angle 0 in their coordinate system
+    drawResult(displayProcessed, peak_indices, 0); 
+
+    m_currentPixmap = matToQPixmap(displayProcessed);
+    QPixmap originalPixmap = matToQPixmap(displayOriginal);
+
+    if (!originalPixmap.isNull()) {
+        m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+    if (!m_currentPixmap.isNull()) {
+        m_processedImageLabel->setPixmap(m_currentPixmap.scaled(m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
 }
+
+
+void ImageSpacingWidget::applyPreprocessing(const cv::Mat &src, cv::Mat &dst) {
+    if (src.empty()) {
+        dst = cv::Mat();
+        return;
+    }
+
+    double brightness = m_brightnessSlider->value();
+    double contrast = m_contrastSlider->value() / 50.0;
+    double gamma = m_gammaSlider->value() / 100.0;
+
+    cv::Mat tempFrame;
+    
+    if (src.channels() == 3) {
+        cv::cvtColor(src, tempFrame, cv::COLOR_BGR2GRAY);
+    } else {
+        tempFrame = src.clone();
+    }
+
+    tempFrame.convertTo(dst, CV_8U, contrast, brightness);
+
+    if (gamma != 1.0) {
+        cv::Mat lookUpTable(1, 256, CV_8U);
+        uchar *p = lookUpTable.ptr();
+        for (int i = 0; i < 256; ++i) {
+            p[i] = cv::saturate_cast<uchar>(pow(i / 255.0, gamma) * 255.0);
+        }
+        cv::LUT(dst, lookUpTable, dst);
+    }
+}
+
+void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<int> &peak_indices, double angle_deg) {
+    cv::Mat rot_inv;
+    cv::Point2f center(displayImage.cols/2.0, displayImage.rows/2.0);
+    cv::Mat rot = cv::getRotationMatrix2D(center, angle_deg, 1.0);
+    cv::invertAffineTransform(rot, rot_inv);
+
+    for (int peak_x : peak_indices) {
+        // Create points for a vertical line at peak_x in the rotated coordinate system
+        std::vector<cv::Point2f> line_points;
+        line_points.push_back(cv::Point2f(peak_x, 0));
+        line_points.push_back(cv::Point2f(peak_x, displayImage.rows));
+        
+        // Transform points back to original image coordinates
+        std::vector<cv::Point2f> transformed_points;
+        cv::transform(line_points, transformed_points, rot_inv);
+
+        if (transformed_points.size() == 2) {
+            cv::line(displayImage, transformed_points[0], transformed_points[1], cv::Scalar(0, 255, 0), 2);
+        }
+    }
+
+    if (peak_indices.size() == 2) {
+         // Create points for a horizontal line connecting the peaks in the rotated coordinate system
+        std::vector<cv::Point2f> line_points;
+        line_points.push_back(cv::Point2f(peak_indices[0], displayImage.rows / 2));
+        line_points.push_back(cv::Point2f(peak_indices[1], displayImage.rows / 2));
+
+        // Transform points back to original image coordinates
+        std::vector<cv::Point2f> transformed_points;
+        cv::transform(line_points, transformed_points, rot_inv);
+        
+        if (transformed_points.size() == 2) {
+            cv::line(displayImage, transformed_points[0], transformed_points[1], cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+        }
+    }
+}
+
 
 QPixmap ImageSpacingWidget::matToQPixmap(const cv::Mat& mat)
 {
@@ -191,5 +513,5 @@ QPixmap ImageSpacingWidget::matToQPixmap(const cv::Mat& mat)
     }
     
     QImage qimg(rgbMat.data, rgbMat.cols, rgbMat.rows, rgbMat.step, QImage::Format_RGB888);
-    return QPixmap::fromImage(qimg);
+    return QPixmap::fromImage(qimg.copy());
 } 

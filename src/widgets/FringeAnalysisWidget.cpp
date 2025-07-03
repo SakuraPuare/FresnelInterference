@@ -8,209 +8,376 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QTextEdit>
-#include <QComboBox>
+#include <QSpinBox>
 #include <QCheckBox>
+#include <QTimer>
 
 #include <opencv2/imgproc.hpp>
+#include <vector>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
+
+// Shifts the quadrants of a Fourier image so the origin is at the center
+static void fftshift(cv::Mat &mag) {
+    int cx = mag.cols / 2;
+    int cy = mag.rows / 2;
+
+    cv::Mat q0(mag, cv::Rect(0, 0, cx, cy));
+    cv::Mat q1(mag, cv::Rect(cx, 0, cx, cy));
+    cv::Mat q2(mag, cv::Rect(0, cy, cx, cy));
+    cv::Mat q3(mag, cv::Rect(cx, cy, cx, cy));
+
+    cv::Mat tmp;
+    q0.copyTo(tmp);
+    q3.copyTo(q0);
+    tmp.copyTo(q3);
+
+    q1.copyTo(tmp);
+    q2.copyTo(q1);
+    tmp.copyTo(q2);
+}
+
+namespace {
+// Helper function to calculate mean and standard deviation
+void calculateStats(const std::vector<double> &data, double &mean,
+                    double &stddev) {
+    if (data.size() < 2) {
+        mean = data.empty() ? 0.0 : data[0];
+        stddev = 0.0;
+        return;
+    }
+    double sum = std::accumulate(data.begin(), data.end(), 0.0);
+    mean = sum / data.size();
+    double sq_sum =
+        std::inner_product(data.begin(), data.end(), data.begin(), 0.0);
+    stddev = std::sqrt(sq_sum / data.size() - mean * mean);
+}
+} // namespace
 
 FringeAnalysisWidget::FringeAnalysisWidget(QWidget *parent)
     : QWidget(parent)
-    , m_isAnalysisActive(false)
+    , m_pixelSize_um(3.45) // Default value
+    , m_isFrozenForAnalysis(false)
 {
     setupUI();
+
+    m_previewUpdateTimer = new QTimer(this);
+    m_previewUpdateTimer->setSingleShot(true);
+    m_previewUpdateTimer->setInterval(100); // 100ms debounce time for smoother tuning
+
+    connect(m_startButton, &QPushButton::toggled, this, &FringeAnalysisWidget::toggleFreezeMode);
+    
+    // Connect ALL parameter changes to schedule a re-analysis
+    connect(m_brightnessSlider, &QSlider::valueChanged, this, &FringeAnalysisWidget::scheduleReanalysis);
+    connect(m_contrastSlider, &QSlider::valueChanged, this, &FringeAnalysisWidget::scheduleReanalysis);
+    connect(m_gammaSlider, &QSlider::valueChanged, this, &FringeAnalysisWidget::scheduleReanalysis);
+    connect(m_peakThreshSlider, &QSlider::valueChanged, this, &FringeAnalysisWidget::scheduleReanalysis);
+    connect(m_minPeakDistSlider, &QSlider::valueChanged, this, &FringeAnalysisWidget::scheduleReanalysis);
+    connect(m_detectValleysCheck, &QCheckBox::toggled, this, &FringeAnalysisWidget::scheduleReanalysis);
+
+    // The timer will trigger the actual analysis/preview update
+    connect(m_previewUpdateTimer, &QTimer::timeout, this, [this]() {
+        if (m_isFrozenForAnalysis) {
+            performAnalysis();
+        } else {
+            updatePreviewImage();
+        }
+    });
+}
+
+FringeAnalysisWidget::~FringeAnalysisWidget()
+{
+    delete m_previewUpdateTimer;
+}
+
+void FringeAnalysisWidget::setPixelSize(double pixelSize_um)
+{
+    m_pixelSize_um = pixelSize_um;
+    m_pixelSizeLabel->setText(QString("%1 μm").arg(m_pixelSize_um, 0, 'f', 2));
+    scheduleReanalysis();
 }
 
 void FringeAnalysisWidget::setupUI()
 {
-    QHBoxLayout* layout = new QHBoxLayout(this);
+    QHBoxLayout* mainLayout = new QHBoxLayout(this);
     
-    // Image Display
-    QGroupBox* imageGroup = new QGroupBox("条纹分析结果");
-    QVBoxLayout* imageLayout = new QVBoxLayout(imageGroup);
+    // Image display area with two images
+    QHBoxLayout* imageDisplayLayout = new QHBoxLayout();
     
-    m_imageLabel = new QLabel("等待输入图像...");
-    m_imageLabel->setMinimumSize(640, 480);
-    m_imageLabel->setFrameStyle(QFrame::Box);
-    m_imageLabel->setAlignment(Qt::AlignCenter);
-    m_imageLabel->setScaledContents(false);
-    m_imageLabel->setStyleSheet("QLabel { background-color: #2b2b2b; color: white; }");
-    imageLayout->addWidget(m_imageLabel);
+    QGroupBox* originalGroup = new QGroupBox("原始图像 / 冻结帧");
+    QVBoxLayout* originalLayout = new QVBoxLayout(originalGroup);
+    m_originalImageLabel = new QLabel("等待输入图像...");
+    m_originalImageLabel->setMinimumSize(400, 300);
+    m_originalImageLabel->setFrameStyle(QFrame::Box);
+    m_originalImageLabel->setAlignment(Qt::AlignCenter);
+    m_originalImageLabel->setStyleSheet("QLabel { background-color: #2b2b2b; color: white; }");
+    originalLayout->addWidget(m_originalImageLabel);
+    
+    QGroupBox* processedGroup = new QGroupBox("预处理与分析结果");
+    QVBoxLayout* processedLayout = new QVBoxLayout(processedGroup);
+    m_processedImageLabel = new QLabel("等待输入图像...");
+    m_processedImageLabel->setMinimumSize(400, 300);
+    m_processedImageLabel->setFrameStyle(QFrame::Box);
+    m_processedImageLabel->setAlignment(Qt::AlignCenter);
+    m_processedImageLabel->setStyleSheet("QLabel { background-color: #2b2b2b; color: white; }");
+    processedLayout->addWidget(m_processedImageLabel);
+    
+    imageDisplayLayout->addWidget(originalGroup);
+    imageDisplayLayout->addWidget(processedGroup);
+
+    // Main layout container for images and results text
+    QVBoxLayout* leftPanelLayout = new QVBoxLayout();
+    leftPanelLayout->addLayout(imageDisplayLayout);
     
     m_resultText = new QTextEdit();
     m_resultText->setMaximumHeight(100);
     m_resultText->setReadOnly(true);
     m_resultText->setStyleSheet("QTextEdit { background-color: #1e1e1e; color: #00ff00; }");
-    imageLayout->addWidget(m_resultText);
+    leftPanelLayout->addWidget(m_resultText);
     
-    layout->addWidget(imageGroup);
+    mainLayout->addLayout(leftPanelLayout, 4); 
     
-    // Control Panel
+    // Right panel for controls
     QVBoxLayout* controlLayout = new QVBoxLayout();
     
-    // Control Buttons
-    QGroupBox* controlGroup = new QGroupBox("条纹分析控制");
+    QGroupBox* controlGroup = new QGroupBox("分析控制");
     QVBoxLayout* controlGroupLayout = new QVBoxLayout(controlGroup);
     
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-    m_startButton = new QPushButton("开始分析");
-    m_stopButton = new QPushButton("停止分析");
-    m_stopButton->setEnabled(false);
-    buttonLayout->addWidget(m_startButton);
-    buttonLayout->addWidget(m_stopButton);
-    controlGroupLayout->addLayout(buttonLayout);
-    
+    m_startButton = new QPushButton("冻结帧并调参");
+    m_startButton->setCheckable(true);
+    controlGroupLayout->addWidget(m_startButton);
     controlLayout->addWidget(controlGroup);
     
-    // Parameters
     m_paramsGroup = new QGroupBox("分析参数");
     QFormLayout* paramsLayout = new QFormLayout(m_paramsGroup);
     
-    m_methodCombo = new QComboBox();
-    m_methodCombo->addItems({"FFT频域分析", "梯度检测", "峰值检测"});
-    paramsLayout->addRow("分析方法:", m_methodCombo);
+    m_peakThreshSlider = new QSlider(Qt::Horizontal);
+    m_peakThreshSlider->setRange(1, 254); m_peakThreshSlider->setValue(50);
+    paramsLayout->addRow("亮/暗检测阈值:", m_peakThreshSlider);
+
+    m_minPeakDistSlider = new QSlider(Qt::Horizontal);
+    m_minPeakDistSlider->setRange(1, 100); m_minPeakDistSlider->setValue(10);
+    paramsLayout->addRow("最小特征间距(px):", m_minPeakDistSlider);
     
-    m_threshSlider = new QSlider(Qt::Horizontal);
-    m_threshSlider->setRange(1, 100);
-    m_threshSlider->setValue(20);
-    paramsLayout->addRow("检测阈值:", m_threshSlider);
+    m_detectValleysCheck = new QCheckBox("检测暗条纹 (波谷)");
+    paramsLayout->addRow(m_detectValleysCheck);
     
-    m_fftCheck = new QCheckBox("启用FFT频谱分析");
-    m_fftCheck->setChecked(true);
-    paramsLayout->addRow(m_fftCheck);
-    
+    m_pixelSizeLabel = new QLabel(QString("%1 μm").arg(m_pixelSize_um, 0, 'f', 2));
+    paramsLayout->addRow("像素尺寸(全局):", m_pixelSizeLabel);
     controlLayout->addWidget(m_paramsGroup);
+
+    m_preprocessGroup = new QGroupBox("图像预处理");
+    QFormLayout* preprocessLayout = new QFormLayout(m_preprocessGroup);
+    m_brightnessSlider = new QSlider(Qt::Horizontal); m_brightnessSlider->setRange(-100, 100); m_brightnessSlider->setValue(0);
+    preprocessLayout->addRow("亮度:", m_brightnessSlider);
+    m_contrastSlider = new QSlider(Qt::Horizontal); m_contrastSlider->setRange(1, 200); m_contrastSlider->setValue(100);
+    preprocessLayout->addRow("对比度(x0.02):", m_contrastSlider);
+    m_gammaSlider = new QSlider(Qt::Horizontal); m_gammaSlider->setRange(10, 300); m_gammaSlider->setValue(100);
+    preprocessLayout->addRow("伽马(x0.01):", m_gammaSlider);
+    controlLayout->addWidget(m_preprocessGroup);
+    
     controlLayout->addStretch();
-    
-    layout->addLayout(controlLayout);
-    
-    // Connections
-    connect(m_startButton, &QPushButton::clicked, this, &FringeAnalysisWidget::startAnalysis);
-    connect(m_stopButton, &QPushButton::clicked, this, &FringeAnalysisWidget::stopAnalysis);
-    connect(m_methodCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &FringeAnalysisWidget::onParamsChanged);
-    connect(m_threshSlider, &QSlider::valueChanged, this, &FringeAnalysisWidget::onParamsChanged);
-    connect(m_fftCheck, &QCheckBox::toggled, this, &FringeAnalysisWidget::onParamsChanged);
+    mainLayout->addLayout(controlLayout, 1);
 }
 
 void FringeAnalysisWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
+    if (m_originalFrame.empty()) return;
+
+    QPixmap originalPixmap;
+    if (m_isFrozenForAnalysis) {
+        originalPixmap = matToQPixmap(m_frozenFrame);
+    } else {
+        originalPixmap = matToQPixmap(m_originalFrame);
+    }
+    m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    
     if (!m_currentPixmap.isNull()) {
-        m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        m_processedImageLabel->setPixmap(m_currentPixmap.scaled(m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
 }
 
 void FringeAnalysisWidget::processFrame(const cv::Mat& frame)
 {
-    if (m_isAnalysisActive && !frame.empty()) {
-        cv::Mat result = performAnalysis(frame);
-        m_currentPixmap = matToQPixmap(result);
-        if (!m_currentPixmap.isNull()) {
-            m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    if (m_isFrozenForAnalysis) {
+        return; // Ignore new frames when frozen
+    }
+    updateFrame(frame);
+}
+
+void FringeAnalysisWidget::toggleFreezeMode(bool checked)
+{
+    m_isFrozenForAnalysis = checked;
+    m_startButton->setText(checked ? "返回实时预览" : "冻结帧并调参");
+
+    if (checked) {
+        // Entering freeze mode
+        if (m_originalFrame.empty()) {
+            m_resultText->setText("错误: 没有图像可以冻结。");
+            m_isFrozenForAnalysis = false;
+            m_startButton->setChecked(false);
+            return;
         }
+        m_frozenFrame = m_originalFrame.clone();
+        performAnalysis(); // Perform initial analysis immediately
+    } else {
+        // Returning to live preview mode
+        m_resultText->clear();
+        updateFrame(m_originalFrame); // Refresh display with latest live frame
     }
 }
 
-void FringeAnalysisWidget::startAnalysis()
-{
-    m_isAnalysisActive = true;
-    m_startButton->setEnabled(false);
-    m_stopButton->setEnabled(true);
-    emit logMessage("开始条纹分析");
+void FringeAnalysisWidget::scheduleReanalysis() {
+    // This function acts as a gatekeeper.
+    // In freeze mode, any param change triggers a debounced re-analysis.
+    // In live mode, pre-processing changes trigger a debounced preview update.
+    m_previewUpdateTimer->start();
 }
 
-void FringeAnalysisWidget::stopAnalysis()
-{
-    m_isAnalysisActive = false;
-    m_startButton->setEnabled(true);
-    m_stopButton->setEnabled(false);
-    m_imageLabel->setText("条纹分析已停止");
-    m_currentPixmap = QPixmap();
-    emit logMessage("停止条纹分析");
-}
+void FringeAnalysisWidget::updatePreviewImage() {
+    if (m_originalFrame.empty()) { return; }
 
-void FringeAnalysisWidget::onParamsChanged()
-{
-    // Can be used to trigger re-processing on param change if needed
-}
-
-cv::Mat FringeAnalysisWidget::performAnalysis(const cv::Mat& frame)
-{
-    cv::Mat gray, result = frame.clone();
-    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    cv::Mat processedFrame;
+    applyPreprocessing(m_originalFrame, processedFrame);
     
-    QString method = m_methodCombo->currentText();
-    QString resultText = QString("分析方法: %1\n").arg(method);
+    m_currentPixmap = matToQPixmap(processedFrame);
+    if(!m_currentPixmap.isNull()){
+        m_processedImageLabel->setPixmap(m_currentPixmap.scaled(
+            m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+}
+
+void FringeAnalysisWidget::performAnalysis()
+{
+    if (m_frozenFrame.empty()) {
+        m_resultText->setText("错误：没有冻结的图像用于分析。");
+        return;
+    }
+
+    // Always operate on the frozen frame
+    cv::Mat processedFrame;
+    applyPreprocessing(m_frozenFrame, processedFrame);
+    m_currentFrame = processedFrame.clone();
+
+    cv::Mat grayFrame = m_currentFrame; // Preprocessing already converted to gray
+
+    cv::Mat padded;
+    int m = cv::getOptimalDFTSize(grayFrame.rows);
+    int n = cv::getOptimalDFTSize(grayFrame.cols);
+    cv::copyMakeBorder(grayFrame, padded, 0, m - grayFrame.rows, 0, n - grayFrame.cols, cv::BORDER_CONSTANT, cv::Scalar::all(0));
     
-    if (method == "FFT频域分析" && m_fftCheck->isChecked()) {
-        cv::Mat floatGray;
-        gray.convertTo(floatGray, CV_32F);
-        
-        cv::Mat fftResult;
-        cv::dft(floatGray, fftResult, cv::DFT_COMPLEX_OUTPUT);
-        
-        std::vector<cv::Mat> planes;
-        cv::split(fftResult, planes);
-        cv::Mat magnitude;
-        cv::magnitude(planes[0], planes[1], magnitude);
-        
-        magnitude += cv::Scalar::all(1);
-        cv::log(magnitude, magnitude);
-        
-        cv::normalize(magnitude, magnitude, 0, 255, cv::NORM_MINMAX, CV_8U);
-        cv::cvtColor(magnitude, result, cv::COLOR_GRAY2BGR);
-        
-        resultText += "FFT频域分析完成\n";
+    cv::Mat planes[] = {cv::Mat_<float>(padded), cv::Mat::zeros(padded.size(), CV_32F)};
+    cv::Mat complexI;
+    cv::merge(planes, 2, complexI);
+    cv::dft(complexI, complexI);
+    cv::split(complexI, planes);
+    cv::magnitude(planes[0], planes[1], planes[0]);
+    cv::Mat magI = planes[0];
+    magI += cv::Scalar::all(1);
+    cv::log(magI, magI);
+    fftshift(magI);
+    cv::normalize(magI, magI, 0, 1, cv::NORM_MINMAX);
 
-    } else if (method == "梯度检测") {
-        cv::Mat gradX, gradY, grad;
-        cv::Sobel(gray, gradX, CV_16S, 1, 0, 3);
-        cv::Sobel(gray, gradY, CV_16S, 0, 1, 3);
-        cv::convertScaleAbs(gradX, gradX);
-        cv::convertScaleAbs(gradY, gradY);
-        cv::addWeighted(gradX, 0.5, gradY, 0.5, 0, grad);
-        
-        cv::cvtColor(grad, result, cv::COLOR_GRAY2BGR);
-        resultText += "梯度检测完成\n";
+    cv::Point maxLoc;
+    cv::minMaxLoc(magI, NULL, NULL, NULL, &maxLoc);
 
-    } else if (method == "峰值检测") {
-        cv::Mat blurred;
-        cv::GaussianBlur(gray, blurred, cv::Size(5, 5), 0);
-        
-        int threshold = m_threshSlider->value();
-        for (int y = 1; y < blurred.rows - 1; y++) {
-            for (int x = 1; x < blurred.cols - 1; x++) {
-                uchar center = blurred.at<uchar>(y, x);
-                bool isLocalMax = true;
-                if (center <= threshold) continue;
+    double angle_rad = atan2(maxLoc.y - magI.rows / 2.0, maxLoc.x - magI.cols / 2.0);
+    double angle_deg = (angle_rad * 180.0 / CV_PI);
+    double rotation_angle = angle_deg - 90;
 
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        if (dy == 0 && dx == 0) continue;
-                        if (blurred.at<uchar>(y + dy, x + dx) >= center) {
-                            isLocalMax = false;
-                            break;
-                        }
-                    }
-                    if (!isLocalMax) break;
-                }
-                
-                if (isLocalMax) {
-                    cv::circle(result, cv::Point(x, y), 2, cv::Scalar(0, 255, 0), -1);
-                }
+    cv::Mat rotatedFrame;
+    cv::Point2f center(grayFrame.cols / 2.0, grayFrame.rows / 2.0);
+    cv::Mat rot = cv::getRotationMatrix2D(center, rotation_angle, 1.0);
+    cv::warpAffine(grayFrame, rotatedFrame, rot, grayFrame.size(), cv::INTER_CUBIC, cv::BORDER_REPLICATE);
+
+    cv::Mat projection;
+    cv::reduce(rotatedFrame, projection, 1, cv::REDUCE_AVG, CV_32F);
+
+    std::vector<float> proj_vec;
+    projection.col(0).copyTo(proj_vec);
+
+    if (m_detectValleysCheck->isChecked()) {
+        float max_val = *std::max_element(proj_vec.begin(), proj_vec.end());
+        for (auto &v : proj_vec) { v = max_val - v; }
+    }
+    
+    std::vector<int> peak_indices;
+    int min_dist = m_minPeakDistSlider->value();
+    float threshold = m_peakThreshSlider->value();
+    for (int i = 1; i < (int)proj_vec.size() - 1; ++i) {
+        if (proj_vec[i] > proj_vec[i-1] && proj_vec[i] > proj_vec[i+1] && proj_vec[i] > threshold) {
+            if (peak_indices.empty() || (i - peak_indices.back()) >= min_dist) {
+                peak_indices.push_back(i);
             }
         }
-        resultText += "峰值检测完成\n";
+    }
+
+    QStringList results;
+    results << "分析结果 (冻结帧):\n";
+    results << QString("条纹倾斜角度: %1°\n").arg(angle_deg, 0, 'f', 2);
+
+    if (peak_indices.size() > 1) {
+        std::vector<double> distances;
+        for (size_t i = 0; i < peak_indices.size() - 1; ++i) {
+            distances.push_back(static_cast<double>(peak_indices[i + 1] - peak_indices[i]));
+        }
+
+        double avg_pixel_distance = 0;
+        if (distances.size() > 2) {
+            double mean, stddev;
+            calculateStats(distances, mean, stddev);
+            std::vector<double> filtered_distances;
+            for (double dist : distances) {
+                if (std::abs(dist - mean) <= 1.5 * stddev) {
+                    filtered_distances.push_back(dist);
+                }
+            }
+            if (!filtered_distances.empty()) {
+                avg_pixel_distance = std::accumulate(filtered_distances.begin(), filtered_distances.end(), 0.0) / filtered_distances.size();
+                results << QString("（已过滤 %1 个异常值）\n").arg(distances.size() - filtered_distances.size());
+            } else {
+                avg_pixel_distance = mean;
+                results << "（警告：所有间距均为异常值，使用原始平均值）\n";
+            }
+        } else if (!distances.empty()) {
+            avg_pixel_distance = std::accumulate(distances.begin(), distances.end(), 0.0) / distances.size();
+        }
+
+        double avg_real_distance = avg_pixel_distance * m_pixelSize_um;
+        results << QString("检测到 %1 个条纹\n").arg(peak_indices.size());
+        results << QString("平均像素间距: %1 像素\n").arg(avg_pixel_distance, 0, 'f', 2);
+        results << QString("平均物理间距: %1 μm\n").arg(avg_real_distance, 0, 'f', 2);
+    } else {
+        results << "未能检测到足够的条纹以计算间距。\n";
     }
     
-    m_resultText->setText(resultText);
-    return result;
+    m_resultText->setText(results.join(""));
+    
+    // Create display images and draw results on both
+    cv::Mat displayOriginal, displayProcessed;
+    cv::cvtColor(m_frozenFrame, displayOriginal, cv::COLOR_GRAY2BGR, 3);
+    cv::cvtColor(grayFrame, displayProcessed, cv::COLOR_GRAY2BGR);
+    
+    drawResult(displayOriginal, rotation_angle, peak_indices, projection);
+    drawResult(displayProcessed, rotation_angle, peak_indices, projection);
+
+    // Update labels
+    m_currentPixmap = matToQPixmap(displayProcessed);
+    QPixmap originalPixmap = matToQPixmap(displayOriginal);
+
+    if (!originalPixmap.isNull()) {
+        m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+    if (!m_currentPixmap.isNull()) {
+        m_processedImageLabel->setPixmap(m_currentPixmap.scaled(m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
 }
 
 QPixmap FringeAnalysisWidget::matToQPixmap(const cv::Mat& mat)
 {
-    if (mat.empty()) {
-        return QPixmap();
-    }
+    if (mat.empty()) { return QPixmap(); }
     
     cv::Mat rgbMat;
     if (mat.channels() == 3) {
@@ -218,9 +385,96 @@ QPixmap FringeAnalysisWidget::matToQPixmap(const cv::Mat& mat)
     } else if (mat.channels() == 1) {
         cv::cvtColor(mat, rgbMat, cv::COLOR_GRAY2RGB);
     } else {
-        rgbMat = mat;
+        rgbMat = mat.clone();
     }
     
     QImage qimg(rgbMat.data, rgbMat.cols, rgbMat.rows, rgbMat.step, QImage::Format_RGB888);
-    return QPixmap::fromImage(qimg);
-} 
+    return QPixmap::fromImage(qimg.copy());
+}
+
+void FringeAnalysisWidget::updateFrame(const cv::Mat &frame) {
+    if (frame.empty()) {
+        m_originalImageLabel->setText("无图像输入");
+        m_processedImageLabel->setText("无图像输入");
+        m_currentFrame.release();
+        m_originalFrame.release();
+        m_frozenFrame.release();
+        return;
+    }
+    
+    // Always update the live frame
+    m_originalFrame = frame.clone(); 
+    if (m_originalFrame.channels() != 1) {
+        cv::cvtColor(m_originalFrame, m_originalFrame, cv::COLOR_BGR2GRAY);
+    }
+
+    // Display original frame on the left
+    QPixmap originalPixmap = matToQPixmap(m_originalFrame);
+     if(!originalPixmap.isNull()){
+        m_originalImageLabel->setPixmap(originalPixmap.scaled(
+            m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+    
+    // Update the preprocessed preview on the right
+    updatePreviewImage();
+}
+
+void FringeAnalysisWidget::applyPreprocessing(const cv::Mat &src, cv::Mat &dst) {
+    if (src.empty()) {
+        dst = cv::Mat();
+        return;
+    }
+
+    double brightness = m_brightnessSlider->value();
+    double contrast = m_contrastSlider->value() / 50.0;
+    double gamma = m_gammaSlider->value() / 100.0;
+
+    cv::Mat tempFrame;
+    
+    // Ensure source is grayscale
+    if (src.channels() == 3) {
+        cv::cvtColor(src, tempFrame, cv::COLOR_BGR2GRAY);
+    } else {
+        tempFrame = src.clone();
+    }
+
+    tempFrame.convertTo(dst, CV_8U, contrast, brightness);
+
+    if (gamma != 1.0) {
+        cv::Mat lookUpTable(1, 256, CV_8U);
+        uchar *p = lookUpTable.ptr();
+        for (int i = 0; i < 256; ++i) {
+            p[i] = cv::saturate_cast<uchar>(pow(i / 255.0, gamma) * 255.0);
+        }
+        cv::LUT(dst, lookUpTable, dst);
+    }
+}
+
+void FringeAnalysisWidget::drawResult(cv::Mat &displayImage, double angle, const std::vector<int> &peak_indices, const cv::Mat &projection) {
+    // This function can be expanded to draw detailed results on the image
+    // For now, it just marks the detected peaks.
+
+    // No need to rotate the display image here, we'll transform points instead.
+    // The analysis gives us peak locations in the rotated-and-projected coordinate system.
+    // We need to draw lines on the original-orientation (but preprocessed) image.
+    
+    cv::Mat rot_inv;
+    cv::Point2f center(displayImage.cols/2.0, displayImage.rows/2.0);
+    cv::Mat rot = cv::getRotationMatrix2D(center, angle, 1.0);
+    cv::invertAffineTransform(rot, rot_inv);
+
+    for (int peak_y : peak_indices) {
+        // Create points for a horizontal line at peak_y in the rotated coordinate system
+        std::vector<cv::Point2f> line_points;
+        line_points.push_back(cv::Point2f(0, peak_y));
+        line_points.push_back(cv::Point2f(displayImage.cols, peak_y));
+        
+        // Transform points back to original image coordinates
+        std::vector<cv::Point2f> transformed_points;
+        cv::transform(line_points, transformed_points, rot_inv);
+
+        if (transformed_points.size() == 2) {
+            cv::line(displayImage, transformed_points[0], transformed_points[1], cv::Scalar(0, 255, 0), 1);
+        }
+    }
+}

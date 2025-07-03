@@ -278,10 +278,9 @@ void InputControlWidget::disconnectDevice()
     
     m_currentPixmap = QPixmap();
     m_imageLabel->setText("无图像");
-    emit logMessage(m_cameraTypeCombo->currentText() + "已断开连接");
+    emit logMessage("输入设备已断开");
     emit updateFps(0);
 }
-
 
 void InputControlWidget::captureImage()
 {
@@ -300,7 +299,6 @@ void InputControlWidget::saveImage()
         }
     }
 }
-
 
 void InputControlWidget::onCameraTypeChanged(int index)
 {
@@ -357,7 +355,6 @@ void InputControlWidget::onGammaChanged(int value)
         }
     }
 }
-
 
 QPixmap InputControlWidget::matToQPixmap(const cv::Mat& mat)
 {

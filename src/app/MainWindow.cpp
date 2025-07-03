@@ -8,10 +8,12 @@
 #include <QTime>
 #include <QDebug>
 #include <QMessageBox>
+#include <QInputDialog>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_tabWidget(nullptr)
+    , m_pixelSize_um(3.45) // Default pixel size in micrometers
 {
     setupUI();
     setupMenuBar();
@@ -19,11 +21,13 @@ MainWindow::MainWindow(QWidget *parent)
     
     logMessage("应用程序启动完成");
 
-    // Connect signals from widgets to the main window's status bar
+    // Connect log messages from various widgets to the main window's logger
     connect(m_inputControlWidget, &InputControlWidget::logMessage, this, &MainWindow::logMessage);
     connect(m_circleDetectionWidget, &CircleDetectionWidget::logMessage, this, &MainWindow::logMessage);
-    connect(m_fringeAnalysisWidget, &FringeAnalysisWidget::logMessage, this, &MainWindow::logMessage);
-    connect(m_imageSpacingWidget, &ImageSpacingWidget::logMessage, this, &MainWindow::logMessage);
+
+    // Connect global parameter changes
+    connect(this, &MainWindow::pixelSizeChanged, m_fringeAnalysisWidget, &FringeAnalysisWidget::setPixelSize);
+    connect(this, &MainWindow::pixelSizeChanged, m_imageSpacingWidget, &ImageSpacingWidget::setPixelSize);
 
     connect(m_inputControlWidget, &InputControlWidget::updateFps, m_fpsLabel, [this](double fps){
         m_fpsLabel->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
@@ -33,6 +37,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_inputControlWidget, &InputControlWidget::frameReady, m_circleDetectionWidget, &CircleDetectionWidget::processFrame);
     connect(m_inputControlWidget, &InputControlWidget::frameReady, m_fringeAnalysisWidget, &FringeAnalysisWidget::processFrame);
     connect(m_inputControlWidget, &InputControlWidget::frameReady, m_imageSpacingWidget, &ImageSpacingWidget::processFrame);
+
+    // Initialize widgets with the default pixel size
+    emit pixelSizeChanged(m_pixelSize_um);
 }
 
 MainWindow::~MainWindow()
@@ -82,6 +89,10 @@ void MainWindow::setupMenuBar()
     // connect(m_resetAction, &QAction::triggered, this, &MainWindow::resetSettings); // TODO: Re-implement reset
     settingsMenu->addAction(m_resetAction);
     
+    m_pixelSizeAction = new QAction("像素尺寸设置...", this);
+    connect(m_pixelSizeAction, &QAction::triggered, this, &MainWindow::openPixelSizeDialog);
+    settingsMenu->addAction(m_pixelSizeAction);
+    
     QMenu* helpMenu = menuBar->addMenu("帮助");
     m_aboutAction = new QAction("关于", this);
     connect(m_aboutAction, &QAction::triggered, this, [this](){
@@ -112,6 +123,19 @@ void MainWindow::logMessage(const QString& message)
     qDebug() << QString("[%1] %2").arg(timestamp, message);
     if (m_statusLabel) {
         m_statusLabel->setText(message);
+    }
+}
+
+void MainWindow::openPixelSizeDialog()
+{
+    bool ok;
+    double newPixelSize = QInputDialog::getDouble(this, "像素尺寸设置", 
+        "请输入相机单个像素的尺寸 (μm):", m_pixelSize_um, 0.1, 100.0, 3, &ok);
+    
+    if (ok) {
+        m_pixelSize_um = newPixelSize;
+        logMessage(QString("全局像素尺寸已更新为 %1 μm").arg(m_pixelSize_um));
+        emit pixelSizeChanged(m_pixelSize_um);
     }
 }
 
