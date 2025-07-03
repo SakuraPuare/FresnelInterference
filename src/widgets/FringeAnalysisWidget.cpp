@@ -1,4 +1,5 @@
 #include "FringeAnalysisWidget.h"
+#include "utils/QtCvUtils.h"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -18,10 +19,7 @@
 #include <algorithm>
 #include <cmath>
 
-
-
-
-
+// FringeAnalysisWidget：干涉条纹分析主界面
 FringeAnalysisWidget::FringeAnalysisWidget(QWidget *parent)
     : QWidget(parent)
     , m_pixelSize_um(3.45) // Default value
@@ -234,7 +232,7 @@ void FringeAnalysisWidget::performAnalysis()
                                  m_gammaSlider->value());
     m_currentFrame = processedFrame.clone();
 
-    cv::Mat grayFrame = m_currentFrame; // Preprocessing already converted to gray
+    cv::Mat grayFrame = m_currentFrame; // applyPreprocessing已转灰度
 
     cv::Mat padded;
     int m = cv::getOptimalDFTSize(grayFrame.rows);
@@ -279,13 +277,7 @@ void FringeAnalysisWidget::performAnalysis()
     std::vector<int> peak_indices;
     int min_dist = m_minPeakDistSlider->value();
     float threshold = m_peakThreshSlider->value();
-    for (int i = 1; i < (int)proj_vec.size() - 1; ++i) {
-        if (proj_vec[i] > proj_vec[i-1] && proj_vec[i] > proj_vec[i+1] && proj_vec[i] > threshold) {
-            if (peak_indices.empty() || (i - peak_indices.back()) >= min_dist) {
-                peak_indices.push_back(i);
-            }
-        }
-    }
+    QtCvUtils::findPeaks(proj_vec, threshold, min_dist, peak_indices);
 
     QStringList results;
     results << "分析结果 (冻结帧):\n";
@@ -348,8 +340,6 @@ void FringeAnalysisWidget::performAnalysis()
     }
 }
 
-
-
 void FringeAnalysisWidget::updateFrame(const cv::Mat &frame) {
     if (frame.empty()) {
         m_originalImageLabel->setText("无图像输入");
@@ -376,8 +366,6 @@ void FringeAnalysisWidget::updateFrame(const cv::Mat &frame) {
     // Update the preprocessed preview on the right
     updatePreviewImage();
 }
-
-
 
 void FringeAnalysisWidget::drawResult(cv::Mat &displayImage, double angle, const std::vector<int> &peak_indices, const cv::Mat &projection) {
     // This function can be expanded to draw detailed results on the image

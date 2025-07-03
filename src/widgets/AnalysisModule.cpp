@@ -1,10 +1,11 @@
-#include "AnalysisModule.h"
+#include <cmath>
+#include <map>
 #include <QtMath>
 #include <QLineF>
 #include <numeric>
-#include <cmath>
-#include <map>
+#include "AnalysisModule.h"
 
+// AnalysisModule 实现，负责分析点轨迹、拟合与建议生成
 AnalysisModule::AnalysisModule()
     : m_nextTrackId(0)
 {
@@ -67,19 +68,7 @@ void AnalysisModule::addFramePoints(const std::vector<AnalysisPoint>& points)
     // 计算分析结果（支持单点轨迹）
     for (auto& track : m_tracks) {
         if (track.dataPoints.size() < 1) continue;
-        double sumR = 0, sumX = 0, sumRR = 0, sumRX = 0;
-        double sumY = 0, sumRY = 0;
-        for (const auto& p : track.dataPoints) {
-            sumR += p.r;
-            sumX += p.x;
-            sumRR += p.r * p.r;
-            sumRX += p.r * p.x;
-            sumY += p.y;
-            sumRY += p.r * p.y;
-        }
-        double n = track.dataPoints.size();
-        double den = n * sumRR - sumR * sumR;
-        if (n == 1 || qFuzzyIsNull(den)) {
+        if (track.dataPoints.size() == 1) {
             // 单点轨迹，直接用当前点
             track.slopeX = 0;
             track.slopeY = 0;
@@ -87,8 +76,16 @@ void AnalysisModule::addFramePoints(const std::vector<AnalysisPoint>& points)
             track.magnitude = 0;
             track.direction = "单点";
         } else {
-            track.slopeX = (n * sumRX - sumR * sumX) / den;
-            track.slopeY = (n * sumRY - sumR * sumY) / den;
+            // 用QtCvUtils::linearFit进行线性拟合
+            std::vector<std::pair<double, double>> xr, yr;
+            for (const auto& p : track.dataPoints) {
+                xr.emplace_back(p.r, p.x);
+                yr.emplace_back(p.r, p.y);
+            }
+            auto fitX = QtCvUtils::linearFit(xr);
+            auto fitY = QtCvUtils::linearFit(yr);
+            track.slopeX = fitX ? fitX->first : 0;
+            track.slopeY = fitY ? fitY->first : 0;
             track.angle = atan2(track.slopeY, track.slopeX) * 180.0 / M_PI;
             track.magnitude = std::sqrt(track.slopeX * track.slopeX + track.slopeY * track.slopeY);
             // 方向文本
@@ -104,11 +101,6 @@ void AnalysisModule::addFramePoints(const std::vector<AnalysisPoint>& points)
             else track.direction = "未知";
         }
     }
-}
-
-void AnalysisModule::update()
-{
-    // 目前addFramePoints已做更新
 }
 
 QString AnalysisModule::getSuggestion() const
@@ -128,11 +120,6 @@ QString AnalysisModule::getSuggestion() const
 }
 
 QList<AnalysisTrack> AnalysisModule::getTracks() const
-{
-    return m_tracks;
-}
-
-QList<AnalysisTrack> AnalysisModule::getTableData() const
 {
     return m_tracks;
 }

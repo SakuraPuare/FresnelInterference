@@ -1,4 +1,8 @@
+#include <chrono>
+#include <opencv2/opencv.hpp>
 #include "ImageInput.h"
+
+// ImageInput：图像输入基类实现
 
 bool ImageInput::shouldUpdateFrame() const
 {

@@ -12,6 +12,7 @@
  * 这个类管理帧数据的生命周期，允许多个模块共享同一帧数据
  * 而无需多次复制，提高性能并减少内存使用
  */
+// FrameManager：帧数据共享与管理单例
 class FrameManager
 {
 public:

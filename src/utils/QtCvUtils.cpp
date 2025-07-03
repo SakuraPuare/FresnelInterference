@@ -7,6 +7,8 @@
 
 namespace QtCvUtils {
 
+// QtCvUtils：OpenCV与Qt常用工具函数实现
+
 QPixmap matToQPixmap(const cv::Mat& mat)
 {
     if (mat.empty()) {

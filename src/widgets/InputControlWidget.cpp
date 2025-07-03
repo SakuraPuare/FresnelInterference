@@ -19,6 +19,7 @@
 #include <QTime>
 #include <QResizeEvent>
 
+// InputControlWidget：输入设备控制主界面
 InputControlWidget::InputControlWidget(QWidget *parent)
     : QWidget(parent)
     , m_camera(nullptr)

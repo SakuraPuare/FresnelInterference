@@ -1,5 +1,8 @@
+#include <iostream>
+#include <string>
 #include "MVCameraInput.h"
 
+// MVCameraInput：迈德威视相机输入实现
 MVCameraInput::MVCameraInput()
 {
     this->init();

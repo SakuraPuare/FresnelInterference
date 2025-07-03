@@ -5,6 +5,7 @@
 #include <chrono>
 #include <atomic>
 
+// ImageInput：图像输入基类声明
 class ImageInput
 {
 protected:
@@ -53,4 +54,4 @@ public:
     bool isCacheValid() const;
 };
 
-#endif 
+#endif // IMAGE_INPUT_H 

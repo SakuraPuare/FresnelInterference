@@ -1,4 +1,5 @@
 #include "ImageSpacingWidget.h"
+#include "utils/QtCvUtils.h"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -17,61 +18,7 @@
 #include <algorithm>
 #include <cmath>
 
-// Shifts the quadrants of a Fourier image so the origin is at the center
-static void fftshift(cv::Mat &mag) {
-    int cx = mag.cols / 2;
-    int cy = mag.rows / 2;
-
-    cv::Mat q0(mag, cv::Rect(0, 0, cx, cy));
-    cv::Mat q1(mag, cv::Rect(cx, 0, cx, cy));
-    cv::Mat q2(mag, cv::Rect(0, cy, cx, cy));
-    cv::Mat q3(mag, cv::Rect(cx, cy, cx, cy));
-
-    cv::Mat tmp;
-    q0.copyTo(tmp);
-    q3.copyTo(q0);
-    tmp.copyTo(q3);
-
-    q1.copyTo(tmp);
-    q2.copyTo(q1);
-    tmp.copyTo(q2);
-}
-
-// Helper to find the two strongest peaks that are separated by a minimum distance
-static void findTwoStrongestPeaks(const std::vector<float>& data, float threshold, int min_dist, std::vector<int>& peak_indices) {
-    peak_indices.clear();
-    
-    std::vector<std::pair<float, int>> all_peaks;
-    for (int i = 1; i < (int)data.size() - 1; ++i) {
-        if (data[i] > data[i-1] && data[i] > data[i+1] && data[i] > threshold) {
-            all_peaks.push_back({data[i], i});
-        }
-    }
-
-    if (all_peaks.empty()) return;
-
-    // Sort by intensity (strongest first)
-    std::sort(all_peaks.rbegin(), all_peaks.rend());
-
-    // Add the strongest peak first
-    peak_indices.push_back(all_peaks[0].second);
-
-    // Find the next strongest peak that is far enough away
-    for (size_t i = 1; i < all_peaks.size(); ++i) {
-        if (std::abs(all_peaks[i].second - peak_indices[0]) >= min_dist) {
-            peak_indices.push_back(all_peaks[i].second);
-            break; // Found the second peak
-        }
-    }
-    
-    // Ensure we have two peaks and they are sorted by position
-    if (peak_indices.size() == 2) {
-        std::sort(peak_indices.begin(), peak_indices.end());
-    } else {
-        peak_indices.clear(); // Not enough valid peaks found
-    }
-}
-
+// ImageSpacingWidget：像间距测量主界面
 ImageSpacingWidget::ImageSpacingWidget(QWidget *parent)
     : QWidget(parent)
     , m_isFrozenForAnalysis(false)
@@ -315,7 +262,7 @@ void ImageSpacingWidget::performMeasurement()
     cv::Mat magI = planes[0];
     magI += cv::Scalar::all(1);
     cv::log(magI, magI);
-    fftshift(magI);
+    QtCvUtils::fftshift(magI);
     
     // Find the angle of the lines from the spectrum
     cv::Mat magI_clone = magI.clone();
@@ -395,7 +342,7 @@ void ImageSpacingWidget::performMeasurement()
     }
     
     std::vector<int> peak_indices;
-    findTwoStrongestPeaks(proj_vec, m_peakThreshSlider->value(), m_minPeakDistSlider->value(), peak_indices);
+    QtCvUtils::findTwoStrongestPeaks(proj_vec, m_peakThreshSlider->value(), m_minPeakDistSlider->value(), peak_indices);
 
     QStringList results;
     results << "分析结果 (冻结帧):\n";
@@ -433,9 +380,6 @@ void ImageSpacingWidget::performMeasurement()
         m_processedImageLabel->setPixmap(m_currentPixmap.scaled(m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
 }
-
-
-
 
 void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<int> &peak_indices, double angle_deg) {
     cv::Mat rot_inv;

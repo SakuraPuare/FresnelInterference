@@ -68,4 +68,6 @@ namespace QtCvUtils {
     std::optional<std::pair<double, double>> linearFit(const std::vector<std::pair<double, double>>& data);
 }
 
+// QtCvUtils：OpenCV与Qt常用工具函数集合
+
 #endif // QT_CV_UTILS_H

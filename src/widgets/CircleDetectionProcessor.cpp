@@ -1,6 +1,8 @@
 #include "CircleDetectionProcessor.h"
 #include <opencv2/imgproc.hpp>
+#include "utils/QtCvUtils.h"
 
+// CircleDetectionProcessor 实现，负责圆检测与图像预处理
 CircleDetectionProcessor::CircleDetectionProcessor()
     : m_currentAlgorithm(DetectionAlgorithm::Hough)
     , m_lastProcessedFrame(-1)
@@ -126,18 +128,7 @@ DetectionResult CircleDetectionProcessor::processFrame(const cv::Mat& inputFrame
 cv::Mat CircleDetectionProcessor::preprocessImage(const cv::Mat& input)
 {
     cv::Mat processed;
-    if (input.channels() == 3) {
-        cv::cvtColor(input, processed, cv::COLOR_BGR2GRAY);
-    } else {
-        processed = input.clone();
-    }
-    
-    // 预处理：直方图均衡 + 去噪
-    cv::equalizeHist(processed, processed);
-    cv::GaussianBlur(processed, processed, cv::Size(5, 5), 1, 1);
-    
-    // 转回BGR用于显示
-    cv::cvtColor(processed, processed, cv::COLOR_GRAY2BGR);
+    QtCvUtils::applyPreprocessing(input, processed);
     return processed;
 }
 

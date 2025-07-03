@@ -25,6 +25,9 @@
 #include "AnalysisModule.h"
 #include <QtConcurrent/QtConcurrent>
 
+// 头文件包含顺序：标准库、第三方库、本项目头文件（如有需要可调整）
+
+// CircleDetectionWidget：圆检测主界面
 CircleDetectionWidget::CircleDetectionWidget(QWidget *parent)
     : QWidget(parent)
     , m_isDetectionActive(false)
@@ -449,8 +452,6 @@ void CircleDetectionWidget::updateAnalysisAndSuggestions()
     QString suggestion = m_analysisModule.getSuggestion();
     m_suggestionText->setText(suggestion);
 }
-
-
 
 void CircleDetectionWidget::updateAdvice()
 {

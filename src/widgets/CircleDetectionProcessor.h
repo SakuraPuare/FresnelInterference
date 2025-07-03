@@ -1,8 +1,10 @@
 #ifndef CIRCLE_DETECTION_PROCESSOR_H
 #define CIRCLE_DETECTION_PROCESSOR_H
 
-#include <opencv2/opencv.hpp>
 #include <vector>
+#include <opencv2/opencv.hpp>
+
+// CircleDetectionProcessor：圆检测处理器，支持多种算法
 
 enum class DetectionAlgorithm {
     Hough,

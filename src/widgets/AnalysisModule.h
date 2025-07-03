@@ -1,15 +1,17 @@
 #ifndef ANALYSIS_MODULE_H
 #define ANALYSIS_MODULE_H
 
+#include <vector>
+#include <optional>
+#include <tuple>
 #include <QList>
 #include <QPointF>
 #include <QString>
 #include <QColor>
-#include <vector>
-#include <optional>
-#include <tuple>
 #include <opencv2/core/mat.hpp>
 #include "utils/QtCvUtils.h"
+
+// AnalysisModule：分析点轨迹、线性拟合、建议生成等
 
 struct AnalysisPoint {
     double x;
@@ -42,11 +44,8 @@ public:
     std::optional<std::pair<double, double>> fitYR() const;
     QString getMoveAdvice() const;
     void addFramePoints(const std::vector<AnalysisPoint>& points);
-    void update(); // 轨迹匹配与更新
     QString getSuggestion() const;
     QList<AnalysisTrack> getTracks() const;
-    // 新增：获取表格数据
-    QList<AnalysisTrack> getTableData() const;
 
 private:
     QList<AnalysisTrack> m_tracks;

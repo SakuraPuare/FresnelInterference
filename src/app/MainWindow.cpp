@@ -10,6 +10,9 @@
 #include <QMessageBox>
 #include <QInputDialog>
 
+// 头文件包含顺序：标准库、第三方库、本项目头文件（如有需要可调整）
+
+// MainWindow：主窗口实现
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_tabWidget(nullptr)
