@@ -124,6 +124,48 @@ cv::Mat MVCameraInput::read()
     return matImg;
 }
 
+bool MVCameraInput::setExposureTime(double exposureTime)
+{
+    if (!this->opened) return false;
+    return CameraSetExposureTime(hCamera, exposureTime) == CAMERA_STATUS_SUCCESS;
+}
+
+bool MVCameraInput::setGain(int gain)
+{
+    if (!this->opened) return false;
+    return CameraSetAnalogGain(hCamera, gain) == CAMERA_STATUS_SUCCESS;
+}
+
+bool MVCameraInput::setGamma(double gamma)
+{
+    if (!this->opened) return false;
+    return CameraSetGamma(hCamera, (int)(gamma * 100)) == CAMERA_STATUS_SUCCESS;
+}
+
+double MVCameraInput::getExposureTime()
+{
+    if (!this->opened) return 0.0;
+    double exposureTime = 0.0;
+    CameraGetExposureTime(hCamera, &exposureTime);
+    return exposureTime;
+}
+
+int MVCameraInput::getGain()
+{
+    if (!this->opened) return 0;
+    int gain = 0;
+    CameraGetAnalogGain(hCamera, &gain);
+    return gain;
+}
+
+double MVCameraInput::getGamma()
+{
+    if (!this->opened) return 0.0;
+    int gamma = 0;
+    CameraGetGamma(hCamera, &gamma);
+    return gamma / 100.0;
+}
+
 MVCameraInput::~MVCameraInput()
 {
     CameraUnInit(hCamera);

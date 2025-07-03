@@ -4,7 +4,7 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <stdio.h>
 #include <iostream>
-#include "MVCameraInput.h"
+#include "io/MVCameraInput.h"
 
 // Defining the dimensions of checkerboard
 int CHECKERBOARD[2]{6, 8};
