@@ -1,19 +1,22 @@
 #ifndef CIRCLE_DETECTION_WIDGET_H
 #define CIRCLE_DETECTION_WIDGET_H
 
-// --- Begin Qt Charts ---
+#include <QWidget>
+#include <QPixmap>
+#include <QResizeEvent>
+
+// --- Begin Qt ---
 #include <QtCharts/QChartView>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QValueAxis>
 #include <QtCharts/QScatterSeries>
-// --- End Qt Charts ---
-
-#include <QWidget>
-#include <QPixmap>
-#include <QResizeEvent>
-#include <opencv2/opencv.hpp>
 #include <QList>
 #include <QPointF>
+#include <QColor>
+// --- End Qt ---
+
+#include <opencv2/opencv.hpp>
+#include "CircleDetectionProcessor.h"
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -23,20 +26,25 @@ class QTextEdit;
 class QGroupBox;
 class QChartView;
 class QScatterSeries;
+class QLineSeries;
+class QValueAxis;
+class QComboBox;
+class QStackedWidget;
 QT_END_NAMESPACE
-
-struct CircleData {
-    double x;
-    double y;
-    double radius;
-};
 
 class CircleDetectionWidget : public QWidget
 {
     Q_OBJECT
 
 public:
+    enum class DetectionAlgorithm {
+        Hough,
+        BinaryCenter
+    };
+    Q_ENUM(DetectionAlgorithm)
+
     explicit CircleDetectionWidget(QWidget *parent = nullptr);
+    ~CircleDetectionWidget() override = default;
 
 public slots:
     void processFrame(const cv::Mat& frame);
@@ -47,58 +55,88 @@ signals:
 private slots:
     void startDetection();
     void stopDetection();
-    void onParamsChanged();
     void startRecording();
     void clearRecording();
     void updateStaticImageOffset(int);
+    void onParamsChanged();
+    void onAlgorithmChanged(int index);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    // Setup and Helper methods
     void setupUI();
     void updatePlotsAxes();
+    void updateAnalysisAndSuggestions();
+    void matchAndTrackCircles(const std::vector<cv::Vec3f>& newCircles);
     QPixmap matToQPixmap(const cv::Mat& mat);
     void applyOffsetAndDetect();
-    cv::Mat performDetection(const cv::Mat& frame);
+    
+    // 更新参数到处理器
+    void updateProcessorParams();
 
-    // UI
-    QLabel* m_imageLabel;
+    // --- UI Elements ---
+    QLabel* m_imageLabel;       // Processed image display
+    QLabel* m_origImageLabel;   // Original image display
     QTextEdit* m_resultText;
-    QPushButton* m_startButton;
-    QPushButton* m_stopButton;
-    QGroupBox* m_paramsGroup;
-    QSlider* m_dpSlider;
-    QSlider* m_minDistSlider;
-    QSlider* m_cannyThreshSlider;
-    QSlider* m_centerThreshSlider;
-    QSlider* m_minRadiusSlider;
-    QSlider* m_maxRadiusSlider;
+    QTextEdit* m_suggestionText;
+    QChartView *m_plotViewX, *m_plotViewY;
 
-    // --- New UI elements for recording and plotting ---
-    QGroupBox* m_recordGroup;
-    QPushButton* m_startRecordButton;
-    QPushButton* m_clearRecordButton;
-    QChartView* m_plotViewX;
-    QChartView* m_plotViewY;
+    // --- Controls ---
+    QPushButton *m_startButton, *m_stopButton;
+    QPushButton *m_startRecordButton, *m_clearRecordButton;
+    QGroupBox *m_recordGroup, *m_analysisGroup;
+    
+    // --- Algorithm Specific Controls ---
+    QComboBox* m_algorithmSelector;
+    QStackedWidget* m_paramsStack;
+    QWidget* m_houghParamsWidget;
+    QWidget* m_binaryParamsWidget;
+    
+    // Hough Params
+    QGroupBox* m_paramsGroup; // Note: This is the group for hough params
+    QSlider *m_dpSlider, *m_minDistSlider, *m_cannyThreshSlider, *m_centerThreshSlider, *m_minRadiusSlider, *m_maxRadiusSlider;
 
+    // Binary Params
+    QSlider* m_binaryThreshSlider;
+
+    // --- Test Controls ---
     QGroupBox* m_testGroup;
-    QSlider* m_offsetXSlider;
-    QSlider* m_offsetYSlider;
-    QLabel* m_offsetLabel;
-    // --- End New UI ---
+    QSlider *m_offsetXSlider, *m_offsetYSlider, *m_zoomSlider;
+    QLabel *m_offsetLabel, *m_zoomLabel;
 
-    // State
+    // --- Plotting Axes ---
+    QValueAxis *m_axisX_R, *m_axisX_X, *m_axisY_R, *m_axisY_Y;
+
+    // --- State ---
     bool m_isDetectionActive;
-    QPixmap m_currentPixmap;
-    cv::Mat m_originalFrame;
-
-    // --- New state variables ---
     bool m_isRecording;
+    cv::Mat m_originalFrame;
+    QPixmap m_currentPixmap;
     QPoint m_staticImageOffset;
-    QScatterSeries* m_seriesXR;
-    QScatterSeries* m_seriesYR;
-    QList<CircleData> m_recordedData;
+    DetectionAlgorithm m_currentAlgorithm;
+    
+    // 检测处理器模块
+    CircleDetectionProcessor m_processor;
+    int m_frameCounter;
+
+    // --- Tracking ---
+    struct CircleData { double x, y, radius; };
+    struct TrackedObject {
+        int id;
+        QPointF lastCenter;
+        int framesSinceUpdate = 0;
+        QList<CircleData> dataPoints;
+        QScatterSeries* seriesXR;
+        QLineSeries* fitLineXR;
+        QScatterSeries* seriesYR;
+        QLineSeries* fitLineYR;
+        QColor color;
+    };
+    QMap<int, TrackedObject> m_trackedObjects;
+    int m_nextTrackId;
+    QList<QColor> m_colorPalette;
 };
 
-#endif // CIRCLE_DETECTION_WIDGET_H 
+#endif // CIRCLEDETECTIONWIDGET_H 

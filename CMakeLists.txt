@@ -39,6 +39,7 @@ set(APP_HEADERS
 
 # 输入/输出(IO)源文件
 set(IO_SOURCES
+    src/io/ImageInput.cpp
     src/io/MVCameraInput.cpp
     src/io/VideoInput.cpp
     src/io/StaticImageInput.cpp
@@ -54,12 +55,14 @@ set(IO_HEADERS
 set(WIDGET_SOURCES
     src/widgets/InputControlWidget.cpp
     src/widgets/CircleDetectionWidget.cpp
+    src/widgets/CircleDetectionProcessor.cpp
     src/widgets/FringeAnalysisWidget.cpp
     src/widgets/ImageSpacingWidget.cpp
 )
 set(WIDGET_HEADERS
     src/widgets/InputControlWidget.h
     src/widgets/CircleDetectionWidget.h
+    src/widgets/CircleDetectionProcessor.h
     src/widgets/FringeAnalysisWidget.h
     src/widgets/ImageSpacingWidget.h
 )
