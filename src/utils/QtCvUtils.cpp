@@ -182,4 +182,14 @@ std::optional<std::pair<double, double>> linearFit(const std::vector<std::pair<d
     return std::make_pair(k, b);
 }
 
+QPixmap preprocessToQPixmap(const cv::Mat& src,
+                            double brightness,
+                            double contrast,
+                            double gamma)
+{
+    cv::Mat processed;
+    applyPreprocessing(src, processed, brightness, contrast, gamma);
+    return matToQPixmap(processed);
+}
+
 } // namespace QtCvUtils 

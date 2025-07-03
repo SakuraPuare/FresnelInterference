@@ -220,13 +220,10 @@ void ImageSpacingWidget::updateFrame(const cv::Mat &frame) {
 void ImageSpacingWidget::updatePreviewImage() {
     if (m_originalFrame.empty()) { return; }
 
-    cv::Mat processedFrame;
-    QtCvUtils::applyPreprocessing(m_originalFrame, processedFrame,
-                                 m_brightnessSlider->value(),
-                                 m_contrastSlider->value(),
-                                 m_gammaSlider->value());
-    
-    m_currentPixmap = QtCvUtils::matToQPixmap(processedFrame);
+    m_currentPixmap = QtCvUtils::preprocessToQPixmap(m_originalFrame,
+                                                   m_brightnessSlider->value(),
+                                                   m_contrastSlider->value(),
+                                                   m_gammaSlider->value());
     if(!m_currentPixmap.isNull()){
         m_processedImageLabel->setPixmap(m_currentPixmap.scaled(
             m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));

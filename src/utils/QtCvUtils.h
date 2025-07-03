@@ -66,6 +66,19 @@ namespace QtCvUtils {
      * @return 返回拟合的斜率和截距，如果拟合失败返回nullopt
      */
     std::optional<std::pair<double, double>> linearFit(const std::vector<std::pair<double, double>>& data);
+    
+    /**
+     * @brief 预处理图像并转换为QPixmap，方便UI显示
+     * @param src 源图像
+     * @param brightness 亮度调整值 (-100 to 100)
+     * @param contrast 对比度调整值 (1 to 200, 100为原始值)
+     * @param gamma 伽马值 (10 to 300, 100为原始值)
+     * @return 预处理后的QPixmap对象
+     */
+    QPixmap preprocessToQPixmap(const cv::Mat& src,
+                               double brightness = 0,
+                               double contrast = 100,
+                               double gamma = 100);
 }
 
 // QtCvUtils：OpenCV与Qt常用工具函数集合
