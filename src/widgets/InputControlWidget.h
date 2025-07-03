@@ -9,6 +9,7 @@
 
 #include "io/ImageInput.h"
 #include <opencv2/opencv.hpp>
+#include "utils/QtCvUtils.h"
 
 QT_BEGIN_NAMESPACE
 class QGroupBox;
@@ -50,7 +51,6 @@ protected:
 
 private:
     void setupUI();
-    QPixmap matToQPixmap(const cv::Mat& mat);
     
     // UI
     QLabel* m_imageLabel;

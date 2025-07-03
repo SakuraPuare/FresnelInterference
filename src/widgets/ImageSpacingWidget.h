@@ -5,6 +5,7 @@
 #include <QPixmap>
 #include <QResizeEvent>
 #include <opencv2/opencv.hpp>
+#include "utils/QtCvUtils.h"
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -39,8 +40,6 @@ private slots:
 
 private:
     void setupUI();
-    QPixmap matToQPixmap(const cv::Mat& mat);
-    void applyPreprocessing(const cv::Mat &src, cv::Mat &dst);
     void drawResult(cv::Mat &displayImage, const std::vector<int> &peak_indices, double angle_deg);
     void updateFrame(const cv::Mat &frame);
 

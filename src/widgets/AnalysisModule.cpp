@@ -1,6 +1,9 @@
 #include "AnalysisModule.h"
 #include <QtMath>
 #include <QLineF>
+#include <numeric>
+#include <cmath>
+#include <map>
 
 AnalysisModule::AnalysisModule()
     : m_nextTrackId(0)
@@ -172,30 +175,12 @@ std::vector<std::tuple<double, double, double>> AnalysisModule::getPoints() cons
     return m_points;
 }
 
-// 线性拟合 y = kx + b
-static std::optional<std::pair<double, double>> linearFit(const std::vector<std::pair<double, double>>& data) {
-    if (data.size() < 2) return std::nullopt;
-    double sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
-    int n = data.size();
-    for (const auto& [x, y] : data) {
-        sumX += x;
-        sumY += y;
-        sumXX += x * x;
-        sumXY += x * y;
-    }
-    double denominator = n * sumXX - sumX * sumX;
-    if (denominator == 0) return std::nullopt;
-    double k = (n * sumXY - sumX * sumY) / denominator;
-    double b = (sumY * sumXX - sumX * sumXY) / denominator;
-    return std::make_pair(k, b);
-}
-
 std::optional<std::pair<double, double>> AnalysisModule::fitXR() const {
     std::vector<std::pair<double, double>> data;
     for (const auto& [x, y, r] : m_points) {
         data.emplace_back(r, x);
     }
-    return linearFit(data);
+    return QtCvUtils::linearFit(data);
 }
 
 std::optional<std::pair<double, double>> AnalysisModule::fitYR() const {
@@ -203,5 +188,5 @@ std::optional<std::pair<double, double>> AnalysisModule::fitYR() const {
     for (const auto& [x, y, r] : m_points) {
         data.emplace_back(r, y);
     }
-    return linearFit(data);
+    return QtCvUtils::linearFit(data);
 } 

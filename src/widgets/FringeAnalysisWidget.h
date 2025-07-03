@@ -6,6 +6,7 @@
 #include <QResizeEvent>
 #include <opencv2/opencv.hpp>
 #include <vector>
+#include "utils/QtCvUtils.h"
 
 // Forward declarations
 QT_BEGIN_NAMESPACE
@@ -43,8 +44,6 @@ private:
     // Private methods
     void setupUI();
     void updateFrame(const cv::Mat &frame);
-    QPixmap matToQPixmap(const cv::Mat& mat);
-    void applyPreprocessing(const cv::Mat &src, cv::Mat &dst);
     void drawResult(cv::Mat &displayImage, double angle,
                     const std::vector<int> &peak_indices,
                     const cv::Mat &projection);

@@ -194,7 +194,7 @@ void InputControlWidget::updateFrame()
             lastFrameSeq = currentFrameSeq;
             
             // Display raw image - 只在帧更新时重新渲染
-            m_currentPixmap = matToQPixmap(m_currentFrame);
+            m_currentPixmap = QtCvUtils::matToQPixmap(m_currentFrame);
             if (!m_currentPixmap.isNull()) {
                 m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
             }
@@ -356,21 +356,4 @@ void InputControlWidget::onGammaChanged(int value)
     }
 }
 
-QPixmap InputControlWidget::matToQPixmap(const cv::Mat& mat)
-{
-    if (mat.empty()) {
-        return QPixmap();
-    }
-    
-    cv::Mat rgbMat;
-    if (mat.channels() == 3) {
-        cv::cvtColor(mat, rgbMat, cv::COLOR_BGR2RGB);
-    } else if (mat.channels() == 1) {
-        cv::cvtColor(mat, rgbMat, cv::COLOR_GRAY2RGB);
-    } else {
-        rgbMat = mat;
-    }
-    
-    QImage qimg(rgbMat.data, rgbMat.cols, rgbMat.rows, rgbMat.step, QImage::Format_RGB888);
-    return QPixmap::fromImage(qimg);
-} 
+ 

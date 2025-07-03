@@ -301,8 +301,8 @@ void CircleDetectionWidget::processFrame(const cv::Mat& frame)
             }
         }
         // UI刷新（图片和检测结果始终显示，便于调参）
-        QPixmap origPixmap = matToQPixmap(result.originalImage).scaled(m_origImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        QPixmap procPixmap = matToQPixmap(result.processedImage).scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QPixmap origPixmap = QtCvUtils::matToQPixmap(result.originalImage).scaled(m_origImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QPixmap procPixmap = QtCvUtils::matToQPixmap(result.processedImage).scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
         QString resultText = QString("检测到 %1 个目标:\n").arg(result.circles.size());
         for (size_t i = 0; i < result.circles.size(); ++i) {
             cv::Vec3f c = result.circles[i];
@@ -450,24 +450,7 @@ void CircleDetectionWidget::updateAnalysisAndSuggestions()
     m_suggestionText->setText(suggestion);
 }
 
-QPixmap CircleDetectionWidget::matToQPixmap(const cv::Mat& mat)
-{
-    if (mat.empty()) {
-        return QPixmap();
-    }
-    
-    cv::Mat rgbMat;
-    if (mat.channels() == 3) {
-        cv::cvtColor(mat, rgbMat, cv::COLOR_BGR2RGB);
-    } else if (mat.channels() == 1) {
-        cv::cvtColor(mat, rgbMat, cv::COLOR_GRAY2RGB);
-    } else {
-        rgbMat = mat;
-    }
-    
-    QImage qimg(rgbMat.data, rgbMat.cols, rgbMat.rows, rgbMat.step, QImage::Format_RGB888);
-    return QPixmap::fromImage(qimg);
-}
+
 
 void CircleDetectionWidget::updateAdvice()
 {

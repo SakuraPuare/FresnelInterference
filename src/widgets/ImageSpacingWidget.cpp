@@ -203,9 +203,9 @@ void ImageSpacingWidget::resizeEvent(QResizeEvent* event)
 
     QPixmap originalPixmap;
     if (m_isFrozenForAnalysis) {
-        originalPixmap = matToQPixmap(m_frozenFrame);
+        originalPixmap = QtCvUtils::matToQPixmap(m_frozenFrame);
     } else {
-        originalPixmap = matToQPixmap(m_originalFrame);
+        originalPixmap = QtCvUtils::matToQPixmap(m_originalFrame);
     }
     m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     
@@ -261,7 +261,7 @@ void ImageSpacingWidget::updateFrame(const cv::Mat &frame) {
         cv::cvtColor(m_originalFrame, m_originalFrame, cv::COLOR_BGR2GRAY);
     }
 
-    QPixmap originalPixmap = matToQPixmap(m_originalFrame);
+    QPixmap originalPixmap = QtCvUtils::matToQPixmap(m_originalFrame);
      if(!originalPixmap.isNull()){
         m_originalImageLabel->setPixmap(originalPixmap.scaled(
             m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -274,9 +274,12 @@ void ImageSpacingWidget::updatePreviewImage() {
     if (m_originalFrame.empty()) { return; }
 
     cv::Mat processedFrame;
-    applyPreprocessing(m_originalFrame, processedFrame);
+    QtCvUtils::applyPreprocessing(m_originalFrame, processedFrame,
+                                 m_brightnessSlider->value(),
+                                 m_contrastSlider->value(),
+                                 m_gammaSlider->value());
     
-    m_currentPixmap = matToQPixmap(processedFrame);
+    m_currentPixmap = QtCvUtils::matToQPixmap(processedFrame);
     if(!m_currentPixmap.isNull()){
         m_processedImageLabel->setPixmap(m_currentPixmap.scaled(
             m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -291,7 +294,10 @@ void ImageSpacingWidget::performMeasurement()
     }
 
     cv::Mat processedFrame;
-    applyPreprocessing(m_frozenFrame, processedFrame);
+    QtCvUtils::applyPreprocessing(m_frozenFrame, processedFrame,
+                                 m_brightnessSlider->value(),
+                                 m_contrastSlider->value(),
+                                 m_gammaSlider->value());
     m_currentFrame = processedFrame.clone();
 
     // --- Start: FFT-based Angle Detection ---
@@ -417,8 +423,8 @@ void ImageSpacingWidget::performMeasurement()
     // On the processed image, lines are now vertical, so we can draw them with angle 0 in their coordinate system
     drawResult(displayProcessed, peak_indices, 0); 
 
-    m_currentPixmap = matToQPixmap(displayProcessed);
-    QPixmap originalPixmap = matToQPixmap(displayOriginal);
+    m_currentPixmap = QtCvUtils::matToQPixmap(displayProcessed);
+    QPixmap originalPixmap = QtCvUtils::matToQPixmap(displayOriginal);
 
     if (!originalPixmap.isNull()) {
         m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -429,35 +435,7 @@ void ImageSpacingWidget::performMeasurement()
 }
 
 
-void ImageSpacingWidget::applyPreprocessing(const cv::Mat &src, cv::Mat &dst) {
-    if (src.empty()) {
-        dst = cv::Mat();
-        return;
-    }
 
-    double brightness = m_brightnessSlider->value();
-    double contrast = m_contrastSlider->value() / 50.0;
-    double gamma = m_gammaSlider->value() / 100.0;
-
-    cv::Mat tempFrame;
-    
-    if (src.channels() == 3) {
-        cv::cvtColor(src, tempFrame, cv::COLOR_BGR2GRAY);
-    } else {
-        tempFrame = src.clone();
-    }
-
-    tempFrame.convertTo(dst, CV_8U, contrast, brightness);
-
-    if (gamma != 1.0) {
-        cv::Mat lookUpTable(1, 256, CV_8U);
-        uchar *p = lookUpTable.ptr();
-        for (int i = 0; i < 256; ++i) {
-            p[i] = cv::saturate_cast<uchar>(pow(i / 255.0, gamma) * 255.0);
-        }
-        cv::LUT(dst, lookUpTable, dst);
-    }
-}
 
 void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<int> &peak_indices, double angle_deg) {
     cv::Mat rot_inv;
@@ -497,21 +475,4 @@ void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<int
 }
 
 
-QPixmap ImageSpacingWidget::matToQPixmap(const cv::Mat& mat)
-{
-    if (mat.empty()) {
-        return QPixmap();
-    }
-    
-    cv::Mat rgbMat;
-    if (mat.channels() == 3) {
-        cv::cvtColor(mat, rgbMat, cv::COLOR_BGR2RGB);
-    } else if (mat.channels() == 1) {
-        cv::cvtColor(mat, rgbMat, cv::COLOR_GRAY2RGB);
-    } else {
-        rgbMat = mat;
-    }
-    
-    QImage qimg(rgbMat.data, rgbMat.cols, rgbMat.rows, rgbMat.step, QImage::Format_RGB888);
-    return QPixmap::fromImage(qimg.copy());
-} 
+ 

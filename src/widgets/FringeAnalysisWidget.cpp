@@ -18,42 +18,9 @@
 #include <algorithm>
 #include <cmath>
 
-// Shifts the quadrants of a Fourier image so the origin is at the center
-static void fftshift(cv::Mat &mag) {
-    int cx = mag.cols / 2;
-    int cy = mag.rows / 2;
 
-    cv::Mat q0(mag, cv::Rect(0, 0, cx, cy));
-    cv::Mat q1(mag, cv::Rect(cx, 0, cx, cy));
-    cv::Mat q2(mag, cv::Rect(0, cy, cx, cy));
-    cv::Mat q3(mag, cv::Rect(cx, cy, cx, cy));
 
-    cv::Mat tmp;
-    q0.copyTo(tmp);
-    q3.copyTo(q0);
-    tmp.copyTo(q3);
 
-    q1.copyTo(tmp);
-    q2.copyTo(q1);
-    tmp.copyTo(q2);
-}
-
-namespace {
-// Helper function to calculate mean and standard deviation
-void calculateStats(const std::vector<double> &data, double &mean,
-                    double &stddev) {
-    if (data.size() < 2) {
-        mean = data.empty() ? 0.0 : data[0];
-        stddev = 0.0;
-        return;
-    }
-    double sum = std::accumulate(data.begin(), data.end(), 0.0);
-    mean = sum / data.size();
-    double sq_sum =
-        std::inner_product(data.begin(), data.end(), data.begin(), 0.0);
-    stddev = std::sqrt(sq_sum / data.size() - mean * mean);
-}
-} // namespace
 
 FringeAnalysisWidget::FringeAnalysisWidget(QWidget *parent)
     : QWidget(parent)
@@ -188,9 +155,9 @@ void FringeAnalysisWidget::resizeEvent(QResizeEvent* event)
 
     QPixmap originalPixmap;
     if (m_isFrozenForAnalysis) {
-        originalPixmap = matToQPixmap(m_frozenFrame);
+        originalPixmap = QtCvUtils::matToQPixmap(m_frozenFrame);
     } else {
-        originalPixmap = matToQPixmap(m_originalFrame);
+        originalPixmap = QtCvUtils::matToQPixmap(m_originalFrame);
     }
     m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     
@@ -240,9 +207,12 @@ void FringeAnalysisWidget::updatePreviewImage() {
     if (m_originalFrame.empty()) { return; }
 
     cv::Mat processedFrame;
-    applyPreprocessing(m_originalFrame, processedFrame);
+    QtCvUtils::applyPreprocessing(m_originalFrame, processedFrame,
+                                 m_brightnessSlider->value(),
+                                 m_contrastSlider->value(),
+                                 m_gammaSlider->value());
     
-    m_currentPixmap = matToQPixmap(processedFrame);
+    m_currentPixmap = QtCvUtils::matToQPixmap(processedFrame);
     if(!m_currentPixmap.isNull()){
         m_processedImageLabel->setPixmap(m_currentPixmap.scaled(
             m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -258,7 +228,10 @@ void FringeAnalysisWidget::performAnalysis()
 
     // Always operate on the frozen frame
     cv::Mat processedFrame;
-    applyPreprocessing(m_frozenFrame, processedFrame);
+    QtCvUtils::applyPreprocessing(m_frozenFrame, processedFrame,
+                                 m_brightnessSlider->value(),
+                                 m_contrastSlider->value(),
+                                 m_gammaSlider->value());
     m_currentFrame = processedFrame.clone();
 
     cv::Mat grayFrame = m_currentFrame; // Preprocessing already converted to gray
@@ -277,7 +250,7 @@ void FringeAnalysisWidget::performAnalysis()
     cv::Mat magI = planes[0];
     magI += cv::Scalar::all(1);
     cv::log(magI, magI);
-    fftshift(magI);
+    QtCvUtils::fftshift(magI);
     cv::normalize(magI, magI, 0, 1, cv::NORM_MINMAX);
 
     cv::Point maxLoc;
@@ -327,7 +300,7 @@ void FringeAnalysisWidget::performAnalysis()
         double avg_pixel_distance = 0;
         if (distances.size() > 2) {
             double mean, stddev;
-            calculateStats(distances, mean, stddev);
+            QtCvUtils::calculateStats(distances, mean, stddev);
             std::vector<double> filtered_distances;
             for (double dist : distances) {
                 if (std::abs(dist - mean) <= 1.5 * stddev) {
@@ -364,8 +337,8 @@ void FringeAnalysisWidget::performAnalysis()
     drawResult(displayProcessed, rotation_angle, peak_indices, projection);
 
     // Update labels
-    m_currentPixmap = matToQPixmap(displayProcessed);
-    QPixmap originalPixmap = matToQPixmap(displayOriginal);
+    m_currentPixmap = QtCvUtils::matToQPixmap(displayProcessed);
+    QPixmap originalPixmap = QtCvUtils::matToQPixmap(displayOriginal);
 
     if (!originalPixmap.isNull()) {
         m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -375,22 +348,7 @@ void FringeAnalysisWidget::performAnalysis()
     }
 }
 
-QPixmap FringeAnalysisWidget::matToQPixmap(const cv::Mat& mat)
-{
-    if (mat.empty()) { return QPixmap(); }
-    
-    cv::Mat rgbMat;
-    if (mat.channels() == 3) {
-        cv::cvtColor(mat, rgbMat, cv::COLOR_BGR2RGB);
-    } else if (mat.channels() == 1) {
-        cv::cvtColor(mat, rgbMat, cv::COLOR_GRAY2RGB);
-    } else {
-        rgbMat = mat.clone();
-    }
-    
-    QImage qimg(rgbMat.data, rgbMat.cols, rgbMat.rows, rgbMat.step, QImage::Format_RGB888);
-    return QPixmap::fromImage(qimg.copy());
-}
+
 
 void FringeAnalysisWidget::updateFrame(const cv::Mat &frame) {
     if (frame.empty()) {
@@ -409,7 +367,7 @@ void FringeAnalysisWidget::updateFrame(const cv::Mat &frame) {
     }
 
     // Display original frame on the left
-    QPixmap originalPixmap = matToQPixmap(m_originalFrame);
+    QPixmap originalPixmap = QtCvUtils::matToQPixmap(m_originalFrame);
      if(!originalPixmap.isNull()){
         m_originalImageLabel->setPixmap(originalPixmap.scaled(
             m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -419,36 +377,7 @@ void FringeAnalysisWidget::updateFrame(const cv::Mat &frame) {
     updatePreviewImage();
 }
 
-void FringeAnalysisWidget::applyPreprocessing(const cv::Mat &src, cv::Mat &dst) {
-    if (src.empty()) {
-        dst = cv::Mat();
-        return;
-    }
 
-    double brightness = m_brightnessSlider->value();
-    double contrast = m_contrastSlider->value() / 50.0;
-    double gamma = m_gammaSlider->value() / 100.0;
-
-    cv::Mat tempFrame;
-    
-    // Ensure source is grayscale
-    if (src.channels() == 3) {
-        cv::cvtColor(src, tempFrame, cv::COLOR_BGR2GRAY);
-    } else {
-        tempFrame = src.clone();
-    }
-
-    tempFrame.convertTo(dst, CV_8U, contrast, brightness);
-
-    if (gamma != 1.0) {
-        cv::Mat lookUpTable(1, 256, CV_8U);
-        uchar *p = lookUpTable.ptr();
-        for (int i = 0; i < 256; ++i) {
-            p[i] = cv::saturate_cast<uchar>(pow(i / 255.0, gamma) * 255.0);
-        }
-        cv::LUT(dst, lookUpTable, dst);
-    }
-}
 
 void FringeAnalysisWidget::drawResult(cv::Mat &displayImage, double angle, const std::vector<int> &peak_indices, const cv::Mat &projection) {
     // This function can be expanded to draw detailed results on the image

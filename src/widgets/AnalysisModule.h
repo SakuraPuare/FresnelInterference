@@ -8,6 +8,8 @@
 #include <vector>
 #include <optional>
 #include <tuple>
+#include <opencv2/core/mat.hpp>
+#include "utils/QtCvUtils.h"
 
 struct AnalysisPoint {
     double x;
@@ -45,7 +47,7 @@ public:
     QList<AnalysisTrack> getTracks() const;
     // 新增：获取表格数据
     QList<AnalysisTrack> getTableData() const;
-    // 可扩展更多分析接口
+
 private:
     QList<AnalysisTrack> m_tracks;
     int m_nextTrackId;

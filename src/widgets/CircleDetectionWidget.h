@@ -5,6 +5,7 @@
 #include <QPixmap>
 #include <QResizeEvent>
 #include "AnalysisModule.h"
+#include "utils/QtCvUtils.h"
 
 // --- Begin Qt ---
 #include <QtCharts/QChartView>
@@ -74,7 +75,6 @@ private:
     void updatePlotsAxes();
     void updateAnalysisAndSuggestions();
     void matchAndTrackCircles(const std::vector<cv::Vec3f>& newCircles);
-    QPixmap matToQPixmap(const cv::Mat& mat);
     void applyOffsetAndDetect();
     
     // 更新参数到处理器

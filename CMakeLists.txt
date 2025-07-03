@@ -61,6 +61,7 @@ set(WIDGET_SOURCES
     src/widgets/FringeAnalysisWidget.cpp
     src/widgets/ImageSpacingWidget.cpp
     src/widgets/AnalysisModule.cpp
+    src/utils/QtCvUtils.cpp
 )
 set(WIDGET_HEADERS
     src/widgets/InputControlWidget.h
