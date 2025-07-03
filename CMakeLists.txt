@@ -60,6 +60,7 @@ set(WIDGET_SOURCES
     src/widgets/CircleDetectionProcessor.cpp
     src/widgets/FringeAnalysisWidget.cpp
     src/widgets/ImageSpacingWidget.cpp
+    src/widgets/AnalysisModule.cpp
 )
 set(WIDGET_HEADERS
     src/widgets/InputControlWidget.h

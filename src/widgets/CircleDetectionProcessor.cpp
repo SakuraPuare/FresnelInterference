@@ -173,27 +173,35 @@ void CircleDetectionProcessor::detectWithHough(const cv::Mat& gray, std::vector<
 void CircleDetectionProcessor::detectWithGeometricCenter(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& outProcessedImage)
 {
     cv::Mat binary;
-    
-    // 进行二值化处理
     int thresh = m_params.geometricBinaryThresh;
     if (m_params.inverseGeometric) {
         cv::threshold(gray, binary, thresh, 255, cv::THRESH_BINARY_INV);
     } else {
         cv::threshold(gray, binary, thresh, 255, cv::THRESH_BINARY);
     }
-    
+
     // 计算白色像素的几何中心
     cv::Moments moments = cv::moments(binary, true);
-    
     circles.clear();
-    if (moments.m00 != 0) {  // 确保有白色像素
-        double centerX = moments.m10 / moments.m00;
-        double centerY = moments.m01 / moments.m00;
-        
-        // 对于几何中心算法，我们不计算真实半径，设为0表示这是中心点
-        circles.push_back(cv::Vec3f(centerX, centerY, 0));
+    double centerX = 0, centerY = 0, radius = 0;
+    if (moments.m00 != 0) {
+        centerX = moments.m10 / moments.m00;
+        centerY = moments.m01 / moments.m00;
+        // 计算平均半径
+        std::vector<cv::Point> whitePixels;
+        cv::findNonZero(binary, whitePixels);
+        double sumR = 0;
+        for (const auto& pt : whitePixels) {
+            double dx = pt.x - centerX;
+            double dy = pt.y - centerY;
+            sumR += std::sqrt(dx*dx + dy*dy);
+        }
+        if (!whitePixels.empty())
+            radius = sumR / whitePixels.size();
+        else
+            radius = 0;
+        circles.push_back(cv::Vec3f(centerX, centerY, radius));
     }
-    
     // 输出处理图像（显示二值化结果）
     cv::cvtColor(binary, outProcessedImage, cv::COLOR_GRAY2BGR);
 } 

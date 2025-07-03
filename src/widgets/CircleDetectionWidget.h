@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QPixmap>
 #include <QResizeEvent>
+#include "AnalysisModule.h"
 
 // --- Begin Qt ---
 #include <QtCharts/QChartView>
@@ -47,6 +48,8 @@ public:
     explicit CircleDetectionWidget(QWidget *parent = nullptr);
     ~CircleDetectionWidget() override = default;
 
+    void setStaticImageSource(bool isStatic) { m_isStaticImageSource = isStatic; }
+
 public slots:
     void processFrame(const cv::Mat& frame);
 
@@ -76,6 +79,9 @@ private:
     
     // 更新参数到处理器
     void updateProcessorParams();
+    void updateTable();
+    void updateAdvice();
+    void updateChartTracks();
 
     // --- UI Elements ---
     QLabel* m_imageLabel;       // Processed image display
@@ -127,21 +133,14 @@ private:
     int m_frameCounter;
 
     // --- Tracking ---
-    struct CircleData { double x, y, radius; };
-    struct TrackedObject {
-        int id;
-        QPointF lastCenter;
-        int framesSinceUpdate = 0;
-        QList<CircleData> dataPoints;
-        QScatterSeries* seriesXR;
-        QLineSeries* fitLineXR;
-        QScatterSeries* seriesYR;
-        QLineSeries* fitLineYR;
-        QColor color;
-    };
-    QMap<int, TrackedObject> m_trackedObjects;
-    int m_nextTrackId;
-    QList<QColor> m_colorPalette;
+    // struct CircleData { double x, y, radius; };
+    // struct TrackedObject { ... };
+    // QMap<int, TrackedObject> m_trackedObjects;
+    // int m_nextTrackId;
+    // QList<QColor> m_colorPalette;
+    AnalysisModule m_analysisModule;
+    // 静态图像源标志
+    bool m_isStaticImageSource;
 };
 
 #endif // CIRCLEDETECTIONWIDGET_H 
