@@ -3,6 +3,7 @@
 #include "widgets/CircleDetectionWidget.h"
 #include "widgets/FringeAnalysisWidget.h"
 #include "widgets/ImageSpacingWidget.h"
+#include "widgets/CameraControlWidget.h"
 
 #include <QApplication>
 #include <QTime>
@@ -41,6 +42,18 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_inputControlWidget, &InputControlWidget::frameReady, m_fringeAnalysisWidget, &FringeAnalysisWidget::processFrame);
     connect(m_inputControlWidget, &InputControlWidget::frameReady, m_imageSpacingWidget, &ImageSpacingWidget::processFrame);
 
+    // Connect camera control signals
+    connect(m_cameraControlWidget, &CameraControlWidget::frameRateChanged, m_inputControlWidget, &InputControlWidget::setFrameRate);
+    connect(m_cameraControlWidget, &CameraControlWidget::exposureChanged, m_inputControlWidget, &InputControlWidget::setExposure);
+    connect(m_cameraControlWidget, &CameraControlWidget::gainChanged, m_inputControlWidget, &InputControlWidget::setGain);
+    connect(m_cameraControlWidget, &CameraControlWidget::gammaChanged, m_inputControlWidget, &InputControlWidget::setGamma);
+    connect(m_cameraControlWidget, &CameraControlWidget::contrastChanged, m_inputControlWidget, &InputControlWidget::setContrast);
+    connect(m_cameraControlWidget, &CameraControlWidget::sharpnessChanged, m_inputControlWidget, &InputControlWidget::setSharpness);
+    connect(m_cameraControlWidget, &CameraControlWidget::saturationChanged, m_inputControlWidget, &InputControlWidget::setSaturation);
+
+    // Update camera control UI when input source changes
+    connect(m_inputControlWidget, &InputControlWidget::inputSourceChanged, this, &MainWindow::updateCameraParameters);
+
     // Initialize widgets with the default pixel size
     emit pixelSizeChanged(m_pixelSize_um);
 }
@@ -75,6 +88,8 @@ void MainWindow::setupUI()
 
     m_imageSpacingWidget = new ImageSpacingWidget();
     m_tabWidget->addTab(m_imageSpacingWidget, "大小像间距测量");
+
+    m_cameraControlWidget = new CameraControlWidget();
 }
 
 void MainWindow::setupMenuBar()
@@ -95,6 +110,11 @@ void MainWindow::setupMenuBar()
     m_pixelSizeAction = new QAction("像素尺寸设置...", this);
     connect(m_pixelSizeAction, &QAction::triggered, this, &MainWindow::openPixelSizeDialog);
     settingsMenu->addAction(m_pixelSizeAction);
+    
+    m_openCameraControlAct = new QAction("相机参数设置...", this);
+    m_openCameraControlAct->setEnabled(false); // Initially disabled
+    connect(m_openCameraControlAct, &QAction::triggered, this, &MainWindow::openCameraControlWidget);
+    settingsMenu->addAction(m_openCameraControlAct);
     
     QMenu* helpMenu = menuBar->addMenu("帮助");
     m_aboutAction = new QAction("关于", this);
@@ -140,6 +160,36 @@ void MainWindow::openPixelSizeDialog()
         logMessage(QString("全局像素尺寸已更新为 %1 μm").arg(m_pixelSize_um));
         emit pixelSizeChanged(m_pixelSize_um);
     }
+}
+
+void MainWindow::openCameraControlWidget()
+{
+    if (m_cameraControlWidget) {
+        updateCameraParameters();
+        m_cameraControlWidget->show();
+        m_cameraControlWidget->raise();
+        m_cameraControlWidget->activateWindow();
+    }
+}
+
+void MainWindow::updateCameraParameters()
+{
+    auto cameraInput = m_inputControlWidget->getCameraInput();
+    if (!cameraInput) {
+        m_openCameraControlAct->setEnabled(false);
+        return;
+    }
+
+    m_openCameraControlAct->setEnabled(true);
+
+    // Update the control widget with current camera settings
+    m_cameraControlWidget->setFrameRate(cameraInput->getFrameRate());
+    m_cameraControlWidget->setExposure(cameraInput->getExposureTime());
+    m_cameraControlWidget->setGain(cameraInput->getGain());
+    m_cameraControlWidget->setGamma(cameraInput->getGamma());
+    m_cameraControlWidget->setContrast(cameraInput->getContrast());
+    m_cameraControlWidget->setSharpness(cameraInput->getSharpness());
+    m_cameraControlWidget->setSaturation(cameraInput->getSaturation());
 }
 
 #include "moc_MainWindow.cpp" 

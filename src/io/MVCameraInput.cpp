@@ -44,6 +44,23 @@ bool MVCameraInput::init()
     //获得相机的特性描述结构体。该结构体中包含了相机可设置的各种参数的范围信息。决定了相关函数的参数
     CameraGetCapability(hCamera, &tCapability);
 
+    // 遍历所有支持的分辨率
+    for (int i = 0; i < tCapability.iImageSizeDesc; i++) {
+        // 打印每个分辨率的信息
+        printf("Resolution %d: %s, %d x %d\n", i,
+               tCapability.pImageSizeDesc[i].acDescription,
+               tCapability.pImageSizeDesc[i].iWidth,
+               tCapability.pImageSizeDesc[i].iHeight);
+
+        // 查找原生分辨率
+        if (tCapability.pImageSizeDesc[i].iWidth == 2592 && tCapability.pImageSizeDesc[i].iHeight == 1944) {
+            printf("Found native resolution at index %d\n", i);
+            CameraSetImageResolution(hCamera, &tCapability.pImageSizeDesc[i]);
+            this->imgResolution = cv::Size(2592, 1944);
+            break; 
+        }
+    }
+
     if (tCapability.sIspCapacity.bMonoSensor) {
         nChannel = 1;
         CameraSetIspOutFormat(hCamera,CAMERA_MEDIA_TYPE_MONO8);
@@ -59,7 +76,6 @@ bool MVCameraInput::init()
     数据。如果当前相机是触发模式，则需要接收到
     触发帧以后才会更新图像。    */
     CameraPlay(hCamera);
-    CameraSetExposureTime(hCamera, 10000);
 
     /*其他的相机参数设置
     例如 CameraSetExposureTime   CameraGetExposureTime  设置/读取曝光时间
@@ -73,14 +89,14 @@ bool MVCameraInput::init()
     //int analoggain;
     //CameraGetAnalogGain(hCamera, &analoggain);
     //std::cout << "analoggain = " << analoggain << std::endl;
-    //CameraSetAeState(hCamera, false);             //设置为手动曝光
-    //if (CameraSetExposureTime(hCamera, 1000) == 0) //单位为微秒
-    //    std::cout << "set exposure successful!\n";
-    //else
-    //    std::cout << "set exposure failed!\n";
-    //double expTime = 0;
-    //CameraGetExposureTime(hCamera, &expTime);
-    //std::cout << "explore time = " << expTime << "us" << std::endl;
+    CameraSetAeState(hCamera, false);             //设置为手动曝光
+    if (CameraSetExposureTime(hCamera, 10000) == 0) //单位为微秒
+        std::cout << "set exposure successful!\n";
+    else
+        std::cout << "set exposure failed!\n";
+    double expTime = 0;
+    CameraGetExposureTime(hCamera, &expTime);
+    std::cout << "explore time = " << expTime << "us" << std::endl;
     
     this->opened = true;
     return true;
@@ -119,9 +135,9 @@ cv::Mat MVCameraInput::read()
             );
 
             // 只在分辨率不匹配时才进行resize
-            if (matImg.size() != this->imgResolution) {
+            /*if (matImg.size() != this->imgResolution) {
                 cv::resize(matImg, matImg, this->imgResolution);
-            }
+            }*/
         }
 
         //在成功调用CameraGetImageBuffer后，必须调用CameraReleaseImageBuffer来释放获得的buffer。
@@ -150,6 +166,30 @@ bool MVCameraInput::setGamma(double gamma)
     return CameraSetGamma(hCamera, (int)(gamma * 100)) == CAMERA_STATUS_SUCCESS;
 }
 
+bool MVCameraInput::setFrameRate(int frameRate)
+{
+    if (!this->opened) return false;
+    return CameraSetFrameRate(hCamera, frameRate) == CAMERA_STATUS_SUCCESS;
+}
+
+bool MVCameraInput::setContrast(int contrast)
+{
+    if (!this->opened) return false;
+    return CameraSetContrast(hCamera, contrast) == CAMERA_STATUS_SUCCESS;
+}
+
+bool MVCameraInput::setSharpness(int sharpness)
+{
+    if (!this->opened) return false;
+    return CameraSetSharpness(hCamera, sharpness) == CAMERA_STATUS_SUCCESS;
+}
+
+bool MVCameraInput::setSaturation(int saturation)
+{
+    if (!this->opened) return false;
+    return CameraSetSaturation(hCamera, saturation) == CAMERA_STATUS_SUCCESS;
+}
+
 double MVCameraInput::getExposureTime()
 {
     if (!this->opened) return 0.0;
@@ -172,6 +212,38 @@ double MVCameraInput::getGamma()
     int gamma = 0;
     CameraGetGamma(hCamera, &gamma);
     return gamma / 100.0;
+}
+
+int MVCameraInput::getFrameRate()
+{
+    if (!this->opened) return 0;
+    int frameRate = 0;
+    CameraGetFrameRate(hCamera, &frameRate);
+    return frameRate;
+}
+
+int MVCameraInput::getContrast()
+{
+    if (!this->opened) return 0;
+    int contrast = 0;
+    CameraGetContrast(hCamera, &contrast);
+    return contrast;
+}
+
+int MVCameraInput::getSharpness()
+{
+    if (!this->opened) return 0;
+    int sharpness = 0;
+    CameraGetSharpness(hCamera, &sharpness);
+    return sharpness;
+}
+
+int MVCameraInput::getSaturation()
+{
+    if (!this->opened) return 0;
+    int saturation = 0;
+    CameraGetSaturation(hCamera, &saturation);
+    return saturation;
 }
 
 MVCameraInput::~MVCameraInput()

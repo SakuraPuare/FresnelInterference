@@ -1,9 +1,12 @@
 #include "InputControlWidget.h"
 
-#include "io/MVCameraInput.h"
-#include "io/VideoInput.h"
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QDebug>
+
 #include "io/StaticImageInput.h"
-#include "io/FrameManager.h"
+#include "io/VideoInput.h"
+#include "io/MVCameraInput.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -14,10 +17,10 @@
 #include <QComboBox>
 #include <QSlider>
 #include <QSpinBox>
-#include <QFileDialog>
-#include <QMessageBox>
 #include <QTime>
 #include <QResizeEvent>
+#include <opencv2/imgcodecs.hpp>
+#include "utils/QtCvUtils.h"
 
 // InputControlWidget：输入设备控制主界面
 InputControlWidget::InputControlWidget(QWidget *parent)
@@ -26,11 +29,9 @@ InputControlWidget::InputControlWidget(QWidget *parent)
     , m_frameTimer(new QTimer(this))
     , m_frameCount(0)
     , m_lastFrameTime(0)
-    , m_currentPixmap()
+    , m_currentFrame()
 {
     setupUI();
-
-    m_frameTimer->setInterval(33); // ~30fps
     connect(m_frameTimer, &QTimer::timeout, this, &InputControlWidget::updateFrame);
 
     emit logMessage("输入控制模块已加载");
@@ -46,162 +47,65 @@ InputControlWidget::~InputControlWidget()
 
 void InputControlWidget::setupUI()
 {
-    QHBoxLayout* layout = new QHBoxLayout(this);
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
 
-    // Image Display Area
-    QGroupBox* imageGroup = new QGroupBox("图像显示");
-    QVBoxLayout* imageLayout = new QVBoxLayout(imageGroup);
-    
-    m_imageLabel = new QLabel("无图像");
-    m_imageLabel->setMinimumSize(640, 480);
-    m_imageLabel->setFrameStyle(QFrame::Box);
-    m_imageLabel->setAlignment(Qt::AlignCenter);
-    m_imageLabel->setScaledContents(false);
-    m_imageLabel->setStyleSheet("QLabel { border: 1px solid palette(mid); }");
-    imageLayout->addWidget(m_imageLabel);
-    layout->addWidget(imageGroup);
-
-    // Control Panel
-    QVBoxLayout* controlLayout = new QVBoxLayout();
-
-    // Camera Control Group
-    QGroupBox* cameraControlGroup = new QGroupBox("输入控制");
-    QFormLayout* cameraFormLayout = new QFormLayout(cameraControlGroup);
-    
+    // Camera type selection
+    QHBoxLayout* topLayout = new QHBoxLayout();
     m_cameraTypeCombo = new QComboBox();
-    m_cameraTypeCombo->addItems({"迈德威视相机", "普通相机", "图片/视频"});
-    cameraFormLayout->addRow("输入源:", m_cameraTypeCombo);
+    m_cameraTypeCombo->addItem("迈德威视相机");
+    m_cameraTypeCombo->addItem("普通相机");
+    m_cameraTypeCombo->addItem("图片/视频");
+    topLayout->addWidget(new QLabel("输入源:"));
+    topLayout->addWidget(m_cameraTypeCombo);
 
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
     m_connectButton = new QPushButton("连接");
     m_disconnectButton = new QPushButton("断开");
+    m_captureButton = new QPushButton("拍照");
+    m_saveButton = new QPushButton("保存图片");
     m_disconnectButton->setEnabled(false);
-    buttonLayout->addWidget(m_connectButton);
-    buttonLayout->addWidget(m_disconnectButton);
-    cameraFormLayout->addRow(buttonLayout);
-
-    QHBoxLayout* imageButtonLayout = new QHBoxLayout();
-    m_captureButton = new QPushButton("捕获图像");
-    m_saveButton = new QPushButton("保存图像");
     m_captureButton->setEnabled(false);
     m_saveButton->setEnabled(false);
-    imageButtonLayout->addWidget(m_captureButton);
-    imageButtonLayout->addWidget(m_saveButton);
-    cameraFormLayout->addRow(imageButtonLayout);
 
-    controlLayout->addWidget(cameraControlGroup);
+    topLayout->addWidget(m_connectButton);
+    topLayout->addWidget(m_disconnectButton);
+    topLayout->addWidget(m_captureButton);
+    topLayout->addWidget(m_saveButton);
 
-    // Exposure Control Group
-    m_exposureControlGroup = new QGroupBox("相机控制");
-    QFormLayout* exposureLayout = new QFormLayout(m_exposureControlGroup);
+    mainLayout->addLayout(topLayout);
 
-    QHBoxLayout* exposureHLayout = new QHBoxLayout();
-    m_exposureSlider = new QSlider(Qt::Horizontal);
-    m_exposureSlider->setRange(100, 100000);
-    m_exposureSlider->setValue(10000);
-    m_exposureSpinBox = new QSpinBox();
-    m_exposureSpinBox->setRange(100, 100000);
-    m_exposureSpinBox->setValue(10000);
-    exposureHLayout->addWidget(m_exposureSlider);
-    exposureHLayout->addWidget(m_exposureSpinBox);
-    exposureLayout->addRow("曝光时间(μs):", exposureHLayout);
+    // Image display
+    m_imageLabel = new QLabel();
+    m_imageLabel->setMinimumSize(640, 480);
+    m_imageLabel->setAlignment(Qt::AlignCenter);
+    mainLayout->addWidget(m_imageLabel);
 
-    QHBoxLayout* gainHLayout = new QHBoxLayout();
-    m_gainSlider = new QSlider(Qt::Horizontal);
-    m_gainSlider->setRange(0, 100);
-    m_gainSlider->setValue(0);
-    m_gainSpinBox = new QSpinBox();
-    m_gainSpinBox->setRange(0, 100);
-    m_gainSpinBox->setValue(0);
-    gainHLayout->addWidget(m_gainSlider);
-    gainHLayout->addWidget(m_gainSpinBox);
-    exposureLayout->addRow("增益:", gainHLayout);
+    setLayout(mainLayout);
 
-    QHBoxLayout* gammaHLayout = new QHBoxLayout();
-    m_gammaSlider = new QSlider(Qt::Horizontal);
-    m_gammaSlider->setRange(50, 300);
-    m_gammaSlider->setValue(100);
-    m_gammaSpinBox = new QSpinBox();
-    m_gammaSpinBox->setRange(50, 300);
-    m_gammaSpinBox->setValue(100);
-    gammaHLayout->addWidget(m_gammaSlider);
-    gammaHLayout->addWidget(m_gammaSpinBox);
-    exposureLayout->addRow("伽马:", gammaHLayout);
-
-    controlLayout->addWidget(m_exposureControlGroup);
-    
-    controlLayout->addStretch();
-    layout->addLayout(controlLayout);
-
-    // Connections
-    connect(m_cameraTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &InputControlWidget::onCameraTypeChanged);
     connect(m_connectButton, &QPushButton::clicked, this, &InputControlWidget::connectDevice);
     connect(m_disconnectButton, &QPushButton::clicked, this, &InputControlWidget::disconnectDevice);
     connect(m_captureButton, &QPushButton::clicked, this, &InputControlWidget::captureImage);
     connect(m_saveButton, &QPushButton::clicked, this, &InputControlWidget::saveImage);
-    
-    connect(m_exposureSlider, &QSlider::valueChanged, m_exposureSpinBox, &QSpinBox::setValue);
-    connect(m_exposureSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), m_exposureSlider, &QSlider::setValue);
-    connect(m_exposureSlider, &QSlider::valueChanged, this, &InputControlWidget::onExposureChanged);
-    
-    connect(m_gainSlider, &QSlider::valueChanged, m_gainSpinBox, &QSpinBox::setValue);
-    connect(m_gainSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), m_gainSlider, &QSlider::setValue);
-    connect(m_gainSlider, &QSlider::valueChanged, this, &InputControlWidget::onGainChanged);
-
-    connect(m_gammaSlider, &QSlider::valueChanged, m_gammaSpinBox, &QSpinBox::setValue);
-    connect(m_gammaSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), m_gammaSlider, &QSlider::setValue);
-    connect(m_gammaSlider, &QSlider::valueChanged, this, &InputControlWidget::onGammaChanged);
-
-    onCameraTypeChanged(0); // Set initial state
+    connect(m_cameraTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &InputControlWidget::onCameraTypeChanged);
 }
 
 void InputControlWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    if (!m_currentPixmap.isNull()) {
-        m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    if (!m_currentFrame.empty()) {
+        QPixmap pixmap = QtCvUtils::matToQPixmap(m_currentFrame);
+        m_imageLabel->setPixmap(pixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
 }
 
 void InputControlWidget::updateFrame()
 {
-    if (!m_camera || !m_camera->isOpened()) {
-        return;
-    }
-    
-    // 性能优化：使用引用读取，减少内存拷贝
-    static uint64_t lastFrameSeq = 0;
-    uint64_t currentFrameSeq = m_camera->getFrameSequence();
-    
-    // 检查帧是否真的更新了
-    bool frameUpdated = (currentFrameSeq != lastFrameSeq);
-    
-    const cv::Mat& frameRef = m_camera->readRef();
-    if (frameRef.empty()) {
-        // For video files, empty frame means end of video
-        if (dynamic_cast<VideoInput*>(m_camera.get())) {
-             emit logMessage("视频播放结束。");
-             disconnectDevice();
-        }
-        return;
-    }
-    
-    // 只在帧真正更新时才进行处理
-    if (frameUpdated) {
-        // 使用FrameManager进行零拷贝帧管理
-        auto framePtr = FrameManager::getInstance().updateFrame(frameRef);
-        if (framePtr) {
-            m_currentFrame = framePtr->frame; // 保存本地引用用于显示
-            lastFrameSeq = currentFrameSeq;
-            
-            // Display raw image - 只在帧更新时重新渲染
-            m_currentPixmap = QtCvUtils::matToQPixmap(m_currentFrame);
-            if (!m_currentPixmap.isNull()) {
-                m_imageLabel->setPixmap(m_currentPixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            }
-            
-            // Emit frame for analysis tabs - 现在分析模块可以从FrameManager获取帧
-            emit frameReady(m_currentFrame);
+    if (m_camera && m_camera->isOpened()) {
+        const auto& frame = m_camera->read();
+        if (!frame.empty()) {
+            m_currentFrame = frame;
+            emit frameReady(frame);
+            QPixmap pixmap = QtCvUtils::matToQPixmap(frame);
+            m_imageLabel->setPixmap(pixmap.scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
         }
     }
     
@@ -252,7 +156,7 @@ void InputControlWidget::connectDevice()
             m_captureButton->setEnabled(true);
             m_saveButton->setEnabled(true);
             
-            m_frameTimer->start();
+            m_frameTimer->start(33);
             emit logMessage(m_cameraTypeCombo->currentText() + "已连接");
         } else {
             m_camera.reset();
@@ -264,6 +168,7 @@ void InputControlWidget::connectDevice()
         QMessageBox::critical(this, "错误", QString("连接时出错: %1").arg(e.what()));
         emit logMessage(QString("连接异常: %1").arg(e.what()));
     }
+    emit inputSourceChanged();
 }
 
 void InputControlWidget::disconnectDevice()
@@ -277,10 +182,11 @@ void InputControlWidget::disconnectDevice()
     m_captureButton->setEnabled(false);
     m_saveButton->setEnabled(false);
     
-    m_currentPixmap = QPixmap();
+    m_currentFrame = cv::Mat();
     m_imageLabel->setText("无图像");
     emit logMessage("输入设备已断开");
     emit updateFps(0);
+    emit inputSourceChanged();
 }
 
 void InputControlWidget::captureImage()
@@ -304,7 +210,7 @@ void InputControlWidget::saveImage()
 void InputControlWidget::onCameraTypeChanged(int index)
 {
     // "迈德威视相机"
-    m_exposureControlGroup->setVisible(index == 0);
+    disconnectDevice();
 
     // "图片/视频" doesn't need a connect button, it's implicit in file dialog
     if (index == 2) {
@@ -314,47 +220,92 @@ void InputControlWidget::onCameraTypeChanged(int index)
     }
 }
 
-void InputControlWidget::onExposureChanged(int value)
+MVCameraInput* InputControlWidget::getCameraInput()
 {
-    if (m_camera && m_camera->isOpened()) {
-        MVCameraInput* mvCamera = dynamic_cast<MVCameraInput*>(m_camera.get());
-        if (mvCamera) {
-            if (mvCamera->setExposureTime(value)) {
-                emit logMessage(QString("曝光时间已设置为: %1μs").arg(value));
-            } else {
-                emit logMessage("设置曝光时间失败");
-            }
+    return dynamic_cast<MVCameraInput*>(m_camera.get());
+}
+
+void InputControlWidget::setFrameRate(int value)
+{
+    if (auto camera = getCameraInput()) {
+        if (!camera->setFrameRate(value)) {
+            logMessage(QString("设置帧率 %1 失败").arg(value));
         }
     }
+}
+
+void InputControlWidget::setExposure(int value)
+{
+    if (auto camera = getCameraInput()) {
+        if (!camera->setExposureTime(value)) {
+            logMessage(QString("设置曝光 %1 us 失败").arg(value));
+        }
+    }
+}
+
+void InputControlWidget::setGain(int value)
+{
+    if (auto camera = getCameraInput()) {
+        if (!camera->setGain(value)) {
+            logMessage(QString("设置增益 %1 失败").arg(value));
+        }
+    }
+}
+
+void InputControlWidget::setGamma(double value)
+{
+    if (auto camera = getCameraInput()) {
+        if (!camera->setGamma(value)) {
+            logMessage(QString("设置伽马 %1 失败").arg(value));
+        }
+    }
+}
+
+void InputControlWidget::setContrast(int value)
+{
+    if (auto camera = getCameraInput()) {
+        if (!camera->setContrast(value)) {
+            logMessage(QString("设置对比度 %1 失败").arg(value));
+        }
+    }
+}
+
+void InputControlWidget::setSharpness(int value)
+{
+    if (auto camera = getCameraInput()) {
+        if (!camera->setSharpness(value)) {
+            logMessage(QString("设置锐度 %1 失败").arg(value));
+        }
+    }
+}
+
+void InputControlWidget::setSaturation(int value)
+{
+    if (auto camera = getCameraInput()) {
+        if (!camera->setSaturation(value)) {
+            logMessage(QString("设置饱和度 %1 失败").arg(value));
+        }
+    }
+}
+
+void InputControlWidget::onExposureChanged(int value)
+{
+    // TODO: Implement this slot as needed
+    logMessage(QString("onExposureChanged called: %1").arg(value));
 }
 
 void InputControlWidget::onGainChanged(int value)
 {
-    if (m_camera && m_camera->isOpened()) {
-        MVCameraInput* mvCamera = dynamic_cast<MVCameraInput*>(m_camera.get());
-        if (mvCamera) {
-            if (mvCamera->setGain(value)) {
-                emit logMessage(QString("增益已设置为: %1").arg(value));
-            } else {
-                emit logMessage("设置增益失败");
-            }
-        }
-    }
+    // TODO: Implement this slot as needed
+    logMessage(QString("onGainChanged called: %1").arg(value));
 }
 
 void InputControlWidget::onGammaChanged(int value)
 {
-    if (m_camera && m_camera->isOpened()) {
-        MVCameraInput* mvCamera = dynamic_cast<MVCameraInput*>(m_camera.get());
-        if (mvCamera) {
-            double gamma = value / 100.0;
-            if (mvCamera->setGamma(gamma)) {
-                emit logMessage(QString("伽马值已设置为: %1").arg(gamma, 0, 'f', 2));
-            } else {
-                emit logMessage("设置伽马值失败");
-            }
-        }
-    }
+    // TODO: Implement this slot as needed
+    logMessage(QString("onGammaChanged called: %1").arg(value));
 }
+
+#include "moc_InputControlWidget.cpp"
 
  

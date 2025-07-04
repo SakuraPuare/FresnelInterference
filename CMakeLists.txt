@@ -62,6 +62,7 @@ set(WIDGET_SOURCES
     src/widgets/ImageSpacingWidget.cpp
     src/widgets/AnalysisModule.cpp
     src/utils/QtCvUtils.cpp
+    src/widgets/CameraControlWidget.cpp
 )
 set(WIDGET_HEADERS
     src/widgets/InputControlWidget.h
@@ -69,6 +70,7 @@ set(WIDGET_HEADERS
     src/widgets/CircleDetectionProcessor.h
     src/widgets/FringeAnalysisWidget.h
     src/widgets/ImageSpacingWidget.h
+    src/widgets/CameraControlWidget.h
 )
 
 # 创建可执行文件

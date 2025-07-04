@@ -17,6 +17,10 @@
 #include <memory>
 
 #include "io/ImageInput.h"
+#include "widgets/FringeAnalysisWidget.h"
+#include "widgets/ImageSpacingWidget.h"
+#include "widgets/CircleDetectionWidget.h"
+#include "widgets/CameraControlWidget.h"
 
 QT_BEGIN_NAMESPACE
 class QTabWidget;
@@ -25,9 +29,10 @@ class QProgressBar;
 QT_END_NAMESPACE
 
 class InputControlWidget;
-class CircleDetectionWidget;
-class FringeAnalysisWidget;
-class ImageSpacingWidget;
+
+namespace Ui {
+class MainWindow;
+}
 
 class MainWindow : public QMainWindow
 {
@@ -42,12 +47,16 @@ signals:
 
 private slots:
     void openPixelSizeDialog();
+    void openCameraControlWidget();
+    void updateCameraParameters();
 
 private:
     void setupUI();
     void setupMenuBar();
     void setupStatusBar();
     void logMessage(const QString& message);
+    void updateSpacingResult(const QString& result);
+    void updateCircleDetectionResult(const QString& result);
 
 private:
     // UI组件
@@ -63,12 +72,17 @@ private:
     QAction* m_aboutAction;
     QAction* m_resetAction;
     QAction* m_pixelSizeAction;
+    QAction *m_openCameraControlAct;
+    QAction *m_openStaticImageAct;
+    QAction *m_openVideoAct;
+    QAction *m_openCameraAct;
 
     // Tab Widgets
     InputControlWidget* m_inputControlWidget;
-    CircleDetectionWidget* m_circleDetectionWidget;
-    FringeAnalysisWidget* m_fringeAnalysisWidget;
-    ImageSpacingWidget* m_imageSpacingWidget;
+    ImageSpacingWidget *m_imageSpacingWidget;
+    CircleDetectionWidget *m_circleDetectionWidget;
+    FringeAnalysisWidget *m_fringeAnalysisWidget;
+    CameraControlWidget *m_cameraControlWidget;
 
     // Global Settings
     double m_pixelSize_um;

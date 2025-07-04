@@ -8,6 +8,7 @@
 #include <QResizeEvent>
 
 #include "io/ImageInput.h"
+#include "io/MVCameraInput.h"
 #include <opencv2/opencv.hpp>
 #include "utils/QtCvUtils.h"
 
@@ -27,11 +28,23 @@ class InputControlWidget : public QWidget
 public:
     explicit InputControlWidget(QWidget *parent = nullptr);
     ~InputControlWidget();
+    MVCameraInput* getCameraInput();
     
 signals:
     void frameReady(const cv::Mat& frame);
     void logMessage(const QString& message);
     void updateFps(double fps);
+    void inputSourceChanged();
+
+public slots:
+    // Camera parameter slots
+    void setFrameRate(int value);
+    void setExposure(int value);
+    void setGain(int value);
+    void setGamma(double value);
+    void setContrast(int value);
+    void setSharpness(int value);
+    void setSaturation(int value);
 
 private slots:
     void connectDevice();
