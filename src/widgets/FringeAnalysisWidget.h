@@ -17,6 +17,7 @@ class QTextEdit;
 class QGroupBox;
 class QCheckBox;
 class QTimer;
+class QTableWidget;
 QT_END_NAMESPACE
 
 class FringeAnalysisWidget : public QWidget
@@ -52,6 +53,7 @@ private:
     QLabel* m_originalImageLabel;
     QLabel* m_processedImageLabel;
     QTextEdit* m_resultText;
+    QTableWidget* m_resultsTable;
     QPushButton* m_startButton;
     QPushButton* m_stopButton;
     QGroupBox* m_paramsGroup;

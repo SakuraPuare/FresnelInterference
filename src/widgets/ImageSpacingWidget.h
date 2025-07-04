@@ -41,6 +41,7 @@ private slots:
 private:
     void setupUI();
     void drawResult(cv::Mat &displayImage, const std::vector<int> &peak_indices, double angle_deg);
+    void drawResult(cv::Mat &displayImage, const std::vector<cv::Point2f> &centers, double angle_deg);
     void updateFrame(const cv::Mat &frame);
 
     // UI

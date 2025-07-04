@@ -94,9 +94,9 @@ void ImageSpacingWidget::setupUI()
     leftPanelLayout->addLayout(imageDisplayLayout);
     
     m_resultText = new QTextEdit();
-    m_resultText->setMaximumHeight(100);
+    m_resultText->setMaximumHeight(120);
     m_resultText->setReadOnly(true);
-    m_resultText->setStyleSheet("QTextEdit { background-color: #1e1e1e; color: #00ff00; }");
+    m_resultText->setStyleSheet("QTextEdit { background-color: #1e1e1e; color: #00ff00; font-family: 'Courier New', monospace; }");
     leftPanelLayout->addWidget(m_resultText);
     
     mainLayout->addLayout(leftPanelLayout, 4); 
@@ -203,10 +203,7 @@ void ImageSpacingWidget::updateFrame(const cv::Mat &frame) {
         return;
     }
     
-    m_originalFrame = frame.clone(); 
-    if (m_originalFrame.channels() != 1) {
-        cv::cvtColor(m_originalFrame, m_originalFrame, cv::COLOR_BGR2GRAY);
-    }
+    m_originalFrame = frame.clone();
 
     QPixmap originalPixmap = QtCvUtils::matToQPixmap(m_originalFrame);
      if(!originalPixmap.isNull()){
@@ -244,138 +241,156 @@ void ImageSpacingWidget::performMeasurement()
                                  m_gammaSlider->value());
     m_currentFrame = processedFrame.clone();
 
-    // --- Start: FFT-based Angle Detection ---
-    cv::Mat padded;
-    int m = cv::getOptimalDFTSize(m_currentFrame.rows);
-    int n = cv::getOptimalDFTSize(m_currentFrame.cols);
-    cv::copyMakeBorder(m_currentFrame, padded, 0, m - m_currentFrame.rows, 0, n - m_currentFrame.cols, cv::BORDER_CONSTANT, cv::Scalar::all(0));
-    
-    cv::Mat planes[] = {cv::Mat_<float>(padded), cv::Mat::zeros(padded.size(), CV_32F)};
-    cv::Mat complexI;
-    cv::merge(planes, 2, complexI);
-    cv::dft(complexI, complexI);
-    cv::split(complexI, planes);
-    cv::magnitude(planes[0], planes[1], planes[0]);
-    cv::Mat magI = planes[0];
-    magI += cv::Scalar::all(1);
-    cv::log(magI, magI);
-    QtCvUtils::fftshift(magI);
-    
-    // Find the angle of the lines from the spectrum
-    cv::Mat magI_clone = magI.clone();
-    int cx = magI_clone.cols / 2;
-    int cy = magI_clone.rows / 2;
-    // Zero out the center of the spectrum to ignore the DC component
-    cv::circle(magI_clone, cv::Point(cx, cy), 10, cv::Scalar(0), -1);
-
-    // --- New Robust Angle Detection using PCA ---
-    std::vector<cv::Point> locations;
-    double maxVal = 0.0;
-    cv::minMaxLoc(magI_clone, NULL, &maxVal, NULL, NULL);
-
-    double angle_deg;
-
-    // Only proceed if the signal is strong enough
-    if (maxVal > 1e-6) {
-        cv::Mat thresholded_mag;
-        // Threshold to get high-energy points
-        cv::threshold(magI_clone, thresholded_mag, maxVal * 0.5, 255, cv::THRESH_BINARY);
-        cv::findNonZero(thresholded_mag, locations);
-    }
-
-    // Use PCA if enough points are found, otherwise fallback to max location
-    if (locations.size() > 20) {
-        cv::Mat data_pts(locations.size(), 2, CV_64F);
-        for(size_t i = 0; i < locations.size(); i++) {
-            // Center the points around the spectrum's origin for PCA
-            data_pts.at<double>(i, 0) = locations[i].x - cx;
-            data_pts.at<double>(i, 1) = locations[i].y - cy;
-        }
-
-        cv::PCA pca_analysis(data_pts, cv::Mat(), cv::PCA::DATA_AS_ROW);
-        // The first eigenvector is the direction of highest variance
-        cv::Point2f eigenvector(pca_analysis.eigenvectors.at<double>(0, 0), pca_analysis.eigenvectors.at<double>(0, 1));
-        angle_deg = atan2(eigenvector.y, eigenvector.x) * 180.0 / CV_PI;
+    cv::Mat gray_img;
+    if (processedFrame.channels() == 3) {
+        cv::cvtColor(processedFrame, gray_img, cv::COLOR_BGR2GRAY);
     } else {
-        // Fallback for weak signals or very few points
-        cv::Point maxLoc;
-        cv::minMaxLoc(magI_clone, NULL, NULL, NULL, &maxLoc);
-        angle_deg = atan2(maxLoc.y - cy, maxLoc.x - cx) * 180.0 / CV_PI;
+        gray_img = processedFrame;
     }
-    // --- End of PCA-based detection ---
 
-    // Angle of the lines in the image is perpendicular to the angle in the frequency domain.
-    double line_angle_deg = angle_deg - 90.0; 
-
-    // The angle needed to rotate the image to make the lines vertical (target_angle = 90)
-    // is rotation = target_angle - current_angle
-    double rotation_angle = 90.0 - line_angle_deg;
-
-    // Normalize rotation to the shortest path, e.g., -90 to 90
-    if (rotation_angle > 90.0) rotation_angle -= 180.0;
-    if (rotation_angle < -90.0) rotation_angle += 180.0;
-
-    // For display, show a user-friendly angle (e.g., 0-180 degrees)
-    double display_angle = line_angle_deg;
-    if (display_angle < 0.0) display_angle += 180.0;
-
-    // --- End: FFT-based Angle Detection ---
-
-    cv::Mat rotatedFrame;
-    cv::Point2f center(m_currentFrame.cols / 2.0, m_currentFrame.rows / 2.0);
-    cv::Mat rot = cv::getRotationMatrix2D(center, rotation_angle, 1.0);
-    cv::warpAffine(m_currentFrame, rotatedFrame, rot, m_currentFrame.size(), cv::INTER_CUBIC, cv::BORDER_REPLICATE);
-
-    cv::Mat projection;
-    // Now that the lines are vertical, we project horizontally
-    cv::reduce(rotatedFrame, projection, 0, cv::REDUCE_AVG, CV_32F);
-
-    std::vector<float> proj_vec;
-    projection.row(0).copyTo(proj_vec);
-
-    if (m_detectValleysCheck->isChecked()) {
-        float max_val = *std::max_element(proj_vec.begin(), proj_vec.end());
-        for (auto &v : proj_vec) { v = max_val - v; }
-    }
+    cv::threshold(gray_img, gray_img, m_peakThreshSlider->value(), 255, m_detectValleysCheck->isChecked() ? cv::THRESH_BINARY_INV : cv::THRESH_BINARY);
     
-    std::vector<int> peak_indices;
-    QtCvUtils::findTwoStrongestPeaks(proj_vec, m_peakThreshSlider->value(), m_minPeakDistSlider->value(), peak_indices);
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(gray_img, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    QStringList results;
-    results << "分析结果 (冻结帧):\n";
-    results << QString("光斑倾斜角度: %1°\n").arg(display_angle, 0, 'f', 2);
+    std::sort(contours.begin(), contours.end(), [](const auto& c1, const auto& c2) {
+        return cv::contourArea(c1) > cv::contourArea(c2);
+    });
 
-    if (peak_indices.size() == 2) {
-        double pixelDistance = std::abs(peak_indices[1] - peak_indices[0]);
-        double realDistance = pixelDistance * m_pixelSize_um;
+    // Prepare display images (clones, so we won't accumulate drawings)
+    cv::Mat displayOriginal;
+    if (m_frozenFrame.channels() == 1) {
+        cv::cvtColor(m_frozenFrame, displayOriginal, cv::COLOR_GRAY2BGR);
+    } else {
+        displayOriginal = m_frozenFrame.clone();
+    }
+
+    cv::Mat displayProcessed;
+    if (m_currentFrame.channels() == 1) {
+        cv::cvtColor(m_currentFrame, displayProcessed, cv::COLOR_GRAY2BGR);
+    } else {
+        displayProcessed = m_currentFrame.clone();
+    }
+
+    // --------------------------------------------------
+    // 1. Largest-area contour pair (basic analysis)
+    // --------------------------------------------------
+    QString result_string;
+    if (contours.size() >= 2) {
+        auto& c1 = contours[0];
+        auto& c2 = contours[1];
+
+        cv::Moments M1 = cv::moments(c1);
+        cv::Moments M2 = cv::moments(c2);
+
+        cv::Point2f center1(M1.m10 / M1.m00, M1.m01 / M1.m00);
+        cv::Point2f center2(M2.m10 / M2.m00, M2.m01 / M2.m00);
+
+        double dx_px = std::abs(center1.x - center2.x);
+        double dy_px = std::abs(center1.y - center2.y);
+        double dist_px = std::sqrt(dx_px * dx_px + dy_px * dy_px);
         
-        results << "检测到 2 个光斑\n";
-        results << QString("像素间距: %1 像素\n").arg(pixelDistance, 0, 'f', 2);
-        results << QString("物理间距: %1 μm\n").arg(realDistance, 0, 'f', 2);
+        double dist_um = dist_px * m_pixelSize_um;
+        double dx_um = dx_px * m_pixelSize_um;
+        double dy_um = dy_px * m_pixelSize_um;
+
+        double angle_rad = std::atan2(center2.y - center1.y, center2.x - center1.x);
+        double angle_deg = angle_rad * 180.0 / CV_PI;
+
+        result_string.append(QString("检测到两个最大轮廓:\n"));
+        result_string.append(QString("中心点1: (%1, %2)\n").arg(center1.x, 0, 'f', 1).arg(center1.y, 0, 'f', 1));
+        result_string.append(QString("中心点2: (%1, %2)\n").arg(center2.x, 0, 'f', 1).arg(center2.y, 0, 'f', 1));
+        result_string.append(QString("中心间距: %1 px (%2 μm)\n").arg(dist_px, 0, 'f', 2).arg(dist_um, 0, 'f', 2));
+        result_string.append(QString("水平间距(dX): %1 px (%2 μm)\n").arg(dx_px, 0, 'f', 2).arg(dx_um, 0, 'f', 2));
+        result_string.append(QString("垂直间距(dY): %1 px (%2 μm)\n").arg(dy_px, 0, 'f', 2).arg(dy_um, 0, 'f', 2));
+        result_string.append(QString("连线角度: %1°\n").arg(angle_deg, 0, 'f', 2));
+        
+        // Draw on both original & processed display images
+        drawResult(displayProcessed, {center1, center2}, angle_deg);
+        drawResult(displayOriginal, {center1, center2}, angle_deg);
     } else {
-        results << "未能检测到2个足够强的光斑以计算间距。\n";
+        result_string = "未能检测到足够的目标（需要至少两个）。";
     }
-    
-    m_resultText->setText(results.join(""));
-    
-    cv::Mat displayOriginal, displayProcessed;
-    cv::cvtColor(m_frozenFrame, displayOriginal, cv::COLOR_GRAY2BGR, 3);
-    cv::cvtColor(rotatedFrame, displayProcessed, cv::COLOR_GRAY2BGR); // Show the rotated image for verification
-    
-    // Draw results on both images
-    drawResult(displayOriginal, peak_indices, line_angle_deg);
-    // On the processed image, lines are now vertical, so we can draw them with angle 0 in their coordinate system
-    drawResult(displayProcessed, peak_indices, 0); 
 
-    m_currentPixmap = QtCvUtils::matToQPixmap(displayProcessed);
-    QPixmap originalPixmap = QtCvUtils::matToQPixmap(displayOriginal);
+    // --------------------------------------------------
+    // 2. New contour-based analysis + weighted value
+    // --------------------------------------------------
+    cv::Mat thresh_img;
+    cv::threshold(m_currentFrame, thresh_img, m_peakThreshSlider->value(), 255, m_detectValleysCheck->isChecked() ? cv::THRESH_BINARY_INV : cv::THRESH_BINARY);
+    std::vector<std::vector<cv::Point>> contours_new;
+    cv::findContours(thresh_img, contours_new, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    std::sort(contours_new.begin(), contours_new.end(), [](const auto& a, const auto& b){ return cv::contourArea(a) > cv::contourArea(b);} );
 
-    if (!originalPixmap.isNull()) {
-        m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    QStringList contour_results;
+    if (contours_new.size() >= 2) {
+        cv::Moments M1 = cv::moments(contours_new[0]);
+        cv::Moments M2 = cv::moments(contours_new[1]);
+        if (M1.m00 > 0 && M2.m00 > 0) {
+            cv::Point2f center1(M1.m10 / M1.m00, M1.m01 / M1.m00);
+            cv::Point2f center2(M2.m10 / M2.m00, M2.m01 / M2.m00);
+            double dx_px = std::abs(center1.x - center2.x);
+            double dy_px = std::abs(center1.y - center2.y);
+            double dist_px = std::sqrt(dx_px * dx_px + dy_px * dy_px);
+
+            double dx_um = dx_px * m_pixelSize_um;
+            double dy_um = dy_px * m_pixelSize_um;
+            double dist_um = dist_px * m_pixelSize_um;
+            double final_um = (dist_um + dx_um + dy_um) / 3.0;
+
+            contour_results << "\n--- 轮廓分析 (新) ---";
+            contour_results << QString("中心间距: %1 px (%2 μm)").arg(dist_px, 0, 'f', 2).arg(dist_um, 0, 'f', 2);
+            contour_results << QString("水平间距: %1 px (%2 μm)").arg(dx_px, 0, 'f', 2).arg(dx_um, 0, 'f', 2);
+            contour_results << QString("垂直间距: %1 px (%2 μm)").arg(dy_px, 0, 'f', 2).arg(dy_um, 0, 'f', 2);
+            contour_results << QString("加权结果(平均): %1 μm").arg(final_um, 0, 'f', 2);
+
+            // Draw on both display images (red line + circles)
+            int thickness = std::max(1, displayProcessed.cols / 300);
+            cv::Scalar drawColor(0,0,255);
+            cv::line(displayProcessed, center1, center2, drawColor, thickness);
+            cv::circle(displayProcessed, center1, 10, drawColor, thickness);
+            cv::circle(displayProcessed, center2, 10, drawColor, thickness);
+
+            cv::line(displayOriginal, center1, center2, drawColor, thickness);
+            cv::circle(displayOriginal, center1, 10, drawColor, thickness);
+            cv::circle(displayOriginal, center2, 10, drawColor, thickness);
+
+            m_resultText->append(contour_results.join("\n"));
+        }
     }
-    if (!m_currentPixmap.isNull()) {
-        m_processedImageLabel->setPixmap(m_currentPixmap.scaled(m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
+    // --------------------------------------------------
+    // Update result text & image labels
+    // --------------------------------------------------
+    m_resultText->setText(result_string);
+
+    QPixmap procPixmap = QtCvUtils::matToQPixmap(displayProcessed);
+    QPixmap origPixmap = QtCvUtils::matToQPixmap(displayOriginal);
+
+    if (!procPixmap.isNull()) {
+        m_processedImageLabel->setPixmap(procPixmap.scaled(m_processedImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
+    if (!origPixmap.isNull()) {
+        m_originalImageLabel->setPixmap(origPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+}
+
+void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<cv::Point2f> &centers, double angle_deg)
+{
+    if (centers.size() < 2) return;
+
+    int thickness = std::max(1, displayImage.cols / 300);
+    cv::Scalar color = cv::Scalar(0, 0, 255); // Red
+
+    const auto& center1 = centers[0];
+    const auto& center2 = centers[1];
+
+    cv::line(displayImage, center1, center2, color, thickness);
+    cv::circle(displayImage, center1, 10, color, thickness);
+    cv::circle(displayImage, center2, 10, color, thickness);
+
+    QString angle_text = QString::number(angle_deg, 'f', 1) + " deg";
+    cv::Point text_pos((center1.x + center2.x) / 2, (center1.y + center2.y) / 2);
+    cv::putText(displayImage, angle_text.toStdString(), text_pos, cv::FONT_HERSHEY_SIMPLEX, 1.0, color, 2);
 }
 
 void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<int> &peak_indices, double angle_deg) {
@@ -383,6 +398,10 @@ void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<int
     cv::Point2f center(displayImage.cols/2.0, displayImage.rows/2.0);
     cv::Mat rot = cv::getRotationMatrix2D(center, angle_deg, 1.0);
     cv::invertAffineTransform(rot, rot_inv);
+
+    int thickness = std::max(1, displayImage.cols / 300);
+    cv::Scalar peak_color = cv::Scalar(0, 255, 0); // Green
+    cv::Scalar line_color = cv::Scalar(0, 0, 255); // Red
 
     for (int peak_x : peak_indices) {
         // Create points for a vertical line at peak_x in the rotated coordinate system
@@ -395,7 +414,7 @@ void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<int
         cv::transform(line_points, transformed_points, rot_inv);
 
         if (transformed_points.size() == 2) {
-            cv::line(displayImage, transformed_points[0], transformed_points[1], cv::Scalar(0, 255, 0), 2);
+            cv::line(displayImage, transformed_points[0], transformed_points[1], peak_color, thickness);
         }
     }
 
@@ -410,10 +429,9 @@ void ImageSpacingWidget::drawResult(cv::Mat &displayImage, const std::vector<int
         cv::transform(line_points, transformed_points, rot_inv);
         
         if (transformed_points.size() == 2) {
-            cv::line(displayImage, transformed_points[0], transformed_points[1], cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+            cv::line(displayImage, transformed_points[0], transformed_points[1], line_color, thickness, cv::LINE_AA);
         }
     }
 }
-
 
  

@@ -12,6 +12,8 @@
 #include <QSpinBox>
 #include <QCheckBox>
 #include <QTimer>
+#include <QTableWidget>
+#include <QHeaderView>
 
 #include <opencv2/imgproc.hpp>
 #include <vector>
@@ -96,11 +98,19 @@ void FringeAnalysisWidget::setupUI()
     leftPanelLayout->addLayout(imageDisplayLayout);
     
     m_resultText = new QTextEdit();
-    m_resultText->setMaximumHeight(100);
+    m_resultText->setMaximumHeight(120);
     m_resultText->setReadOnly(true);
-    m_resultText->setStyleSheet("QTextEdit { background-color: #1e1e1e; color: #00ff00; }");
+    m_resultText->setStyleSheet("QTextEdit { background-color: #1e1e1e; color: #00ff00; font-family: 'Courier New', monospace; }");
     leftPanelLayout->addWidget(m_resultText);
     
+    m_resultsTable = new QTableWidget();
+    m_resultsTable->setColumnCount(3);
+    m_resultsTable->setHorizontalHeaderLabels({"条纹序号", "位置 (px)", "与上一条纹间距 (px)"});
+    m_resultsTable->setMinimumHeight(150);
+    m_resultsTable->horizontalHeader()->setStretchLastSection(true);
+    m_resultsTable->setStyleSheet("QTableWidget { background-color: #2b2b2b; color: white; gridline-color: #555555; }");
+    leftPanelLayout->addWidget(m_resultsTable);
+
     mainLayout->addLayout(leftPanelLayout, 4); 
     
     // Right panel for controls
@@ -248,12 +258,57 @@ void FringeAnalysisWidget::performAnalysis()
     QtCvUtils::fftshift(magI);
     cv::normalize(magI, magI, 0, 1, cv::NORM_MINMAX);
 
-    cv::Point maxLoc;
-    cv::minMaxLoc(magI, NULL, NULL, NULL, &maxLoc);
+    // --- Start: Robust Angle Detection using Angular Histogram on FFT Spectrum ---
+    int cx = magI.cols / 2;
+    int cy = magI.rows / 2;
 
-    double angle_rad = atan2(maxLoc.y - magI.rows / 2.0, maxLoc.x - magI.cols / 2.0);
-    double angle_deg = (angle_rad * 180.0 / CV_PI);
-    double rotation_angle = angle_deg - 90;
+    // 将幅度谱转换为 8bit 便于阈值处理
+    cv::Mat magU8;
+    magI.convertTo(magU8, CV_8U, 255.0);
+
+    // 去除直流分量
+    cv::circle(magU8, cv::Point(cx, cy), 10, cv::Scalar(0), -1);
+
+    double minVal8U = 0.0, maxVal8U = 0.0;
+    cv::minMaxLoc(magU8, &minVal8U, &maxVal8U, nullptr, nullptr);
+
+    std::vector<cv::Point> nonZeroLocs;
+    if (maxVal8U > 0.0) {
+        cv::Mat binary;
+        // 采用相对阈值保留最亮的频率分量
+        cv::threshold(magU8, binary, maxVal8U * 0.6, 255, cv::THRESH_BINARY);
+        cv::findNonZero(binary, nonZeroLocs);
+    }
+
+    double angle_deg = 90.0; // 默认频域方向
+
+    if (!nonZeroLocs.empty()) {
+        // 统计角度直方图 (0-179 度)
+        std::vector<int> angleHist(180, 0);
+        for (const auto& p : nonZeroLocs) {
+            double ang = atan2(static_cast<double>(p.y - cy), static_cast<double>(p.x - cx)) * 180.0 / CV_PI;
+            if (ang < 0.0) ang += 180.0; // 按 180° 对称折叠
+            int bin = static_cast<int>(std::round(ang)) % 180;
+            angleHist[bin]++;
+        }
+        int bestBin = std::distance(angleHist.begin(), std::max_element(angleHist.begin(), angleHist.end()));
+        angle_deg = static_cast<double>(bestBin);
+    }
+    // --- End: Robust Angle Detection ---
+    
+    // Angle of the fringes is perpendicular to the angle in the frequency domain.
+    double fringe_angle_deg = angle_deg - 90.0;
+    
+    // The angle needed to rotate the image to make the fringes vertical
+    double rotation_angle = 90.0 - fringe_angle_deg;
+
+    // Normalize rotation to the shortest path
+    if (rotation_angle > 90.0) rotation_angle -= 180.0;
+    if (rotation_angle < -90.0) rotation_angle += 180.0;
+    
+    // For display, show a user-friendly angle (e.g., 0-180 degrees)
+    double display_angle = fringe_angle_deg;
+    if (display_angle < 0.0) display_angle += 180.0;
 
     cv::Mat rotatedFrame;
     cv::Point2f center(grayFrame.cols / 2.0, grayFrame.rows / 2.0);
@@ -261,10 +316,10 @@ void FringeAnalysisWidget::performAnalysis()
     cv::warpAffine(grayFrame, rotatedFrame, rot, grayFrame.size(), cv::INTER_CUBIC, cv::BORDER_REPLICATE);
 
     cv::Mat projection;
-    cv::reduce(rotatedFrame, projection, 1, cv::REDUCE_AVG, CV_32F);
+    cv::reduce(rotatedFrame, projection, 0, cv::REDUCE_AVG, CV_32F);
 
     std::vector<float> proj_vec;
-    projection.col(0).copyTo(proj_vec);
+    projection.row(0).copyTo(proj_vec);
 
     if (m_detectValleysCheck->isChecked()) {
         float max_val = *std::max_element(proj_vec.begin(), proj_vec.end());
@@ -272,63 +327,52 @@ void FringeAnalysisWidget::performAnalysis()
     }
     
     std::vector<int> peak_indices;
-    int min_dist = m_minPeakDistSlider->value();
-    float threshold = m_peakThreshSlider->value();
-    QtCvUtils::findPeaks(proj_vec, threshold, min_dist, peak_indices);
+    QtCvUtils::findPeaks(proj_vec, m_peakThreshSlider->value(), m_minPeakDistSlider->value(), peak_indices);
 
     QStringList results;
-    results << "分析结果 (冻结帧):\n";
-    results << QString("条纹倾斜角度: %1°\n").arg(angle_deg, 0, 'f', 2);
+    results << "分析结果 (冻结帧):";
+    results << QString("条纹倾斜角度: %1°").arg(display_angle, 0, 'f', 2);
+
+    m_resultsTable->setRowCount(0); // Clear previous results
 
     if (peak_indices.size() > 1) {
-        std::vector<double> distances;
-        for (size_t i = 0; i < peak_indices.size() - 1; ++i) {
-            distances.push_back(static_cast<double>(peak_indices[i + 1] - peak_indices[i]));
+        std::vector<double> spacings;
+        for (size_t i = 1; i < peak_indices.size(); ++i) {
+            spacings.push_back(peak_indices[i] - peak_indices[i-1]);
         }
+        double avg_spacing_px = std::accumulate(spacings.begin(), spacings.end(), 0.0) / spacings.size();
+        double avg_spacing_um = avg_spacing_px * m_pixelSize_um;
+        
+        results << QString("检测到 %1 条条纹").arg(peak_indices.size());
+        results << QString("平均间距: %1 px  (%2 μm)").arg(avg_spacing_px, 0, 'f', 2).arg(avg_spacing_um, 0, 'f', 2);
 
-        double avg_pixel_distance = 0;
-        if (distances.size() > 2) {
-            double mean, stddev;
-            QtCvUtils::calculateStats(distances, mean, stddev);
-            std::vector<double> filtered_distances;
-            for (double dist : distances) {
-                if (std::abs(dist - mean) <= 1.5 * stddev) {
-                    filtered_distances.push_back(dist);
-                }
-            }
-            if (!filtered_distances.empty()) {
-                avg_pixel_distance = std::accumulate(filtered_distances.begin(), filtered_distances.end(), 0.0) / filtered_distances.size();
-                results << QString("（已过滤 %1 个异常值）\n").arg(distances.size() - filtered_distances.size());
+        // Populate table
+        m_resultsTable->setRowCount(peak_indices.size());
+        for (size_t i = 0; i < peak_indices.size(); ++i) {
+            m_resultsTable->setItem(i, 0, new QTableWidgetItem(QString::number(i + 1)));
+            m_resultsTable->setItem(i, 1, new QTableWidgetItem(QString::number(peak_indices[i])));
+            if (i > 0) {
+                m_resultsTable->setItem(i, 2, new QTableWidgetItem(QString::number(spacings[i-1])));
             } else {
-                avg_pixel_distance = mean;
-                results << "（警告：所有间距均为异常值，使用原始平均值）\n";
+                m_resultsTable->setItem(i, 2, new QTableWidgetItem("N/A"));
             }
-        } else if (!distances.empty()) {
-            avg_pixel_distance = std::accumulate(distances.begin(), distances.end(), 0.0) / distances.size();
         }
 
-        double avg_real_distance = avg_pixel_distance * m_pixelSize_um;
-        results << QString("检测到 %1 个条纹\n").arg(peak_indices.size());
-        results << QString("平均像素间距: %1 像素\n").arg(avg_pixel_distance, 0, 'f', 2);
-        results << QString("平均物理间距: %1 μm\n").arg(avg_real_distance, 0, 'f', 2);
     } else {
-        results << "未能检测到足够的条纹以计算间距。\n";
+        results << "未能检测到足够条纹以计算间距。";
     }
     
-    m_resultText->setText(results.join(""));
+    m_resultText->setText(results.join("\n"));
     
-    // Create display images and draw results on both
     cv::Mat displayOriginal, displayProcessed;
     cv::cvtColor(m_frozenFrame, displayOriginal, cv::COLOR_GRAY2BGR, 3);
-    cv::cvtColor(grayFrame, displayProcessed, cv::COLOR_GRAY2BGR);
+    cv::cvtColor(rotatedFrame, displayProcessed, cv::COLOR_GRAY2BGR);
     
     drawResult(displayOriginal, rotation_angle, peak_indices, projection);
-    drawResult(displayProcessed, rotation_angle, peak_indices, projection);
+    drawResult(displayProcessed, 0, peak_indices, projection); // In rotated, angle is 0
 
-    // Update labels
     m_currentPixmap = QtCvUtils::matToQPixmap(displayProcessed);
     QPixmap originalPixmap = QtCvUtils::matToQPixmap(displayOriginal);
-
     if (!originalPixmap.isNull()) {
         m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
@@ -364,31 +408,29 @@ void FringeAnalysisWidget::updateFrame(const cv::Mat &frame) {
     updatePreviewImage();
 }
 
-void FringeAnalysisWidget::drawResult(cv::Mat &displayImage, double angle, const std::vector<int> &peak_indices, const cv::Mat &projection) {
-    // This function can be expanded to draw detailed results on the image
-    // For now, it just marks the detected peaks.
+void FringeAnalysisWidget::drawResult(cv::Mat &displayImage, double angle,
+                                    const std::vector<int> &peak_indices,
+                                    const cv::Mat &projection) {
+    if (peak_indices.empty()) return;
 
-    // No need to rotate the display image here, we'll transform points instead.
-    // The analysis gives us peak locations in the rotated-and-projected coordinate system.
-    // We need to draw lines on the original-orientation (but preprocessed) image.
-    
+    int thickness = std::max(1, displayImage.cols / 300);
+    cv::Scalar color = cv::Scalar(0, 0, 255); // Red
+
     cv::Mat rot_inv;
     cv::Point2f center(displayImage.cols/2.0, displayImage.rows/2.0);
     cv::Mat rot = cv::getRotationMatrix2D(center, angle, 1.0);
     cv::invertAffineTransform(rot, rot_inv);
 
-    for (int peak_y : peak_indices) {
-        // Create points for a horizontal line at peak_y in the rotated coordinate system
+    for (int peak_x : peak_indices) {
         std::vector<cv::Point2f> line_points;
-        line_points.push_back(cv::Point2f(0, peak_y));
-        line_points.push_back(cv::Point2f(displayImage.cols, peak_y));
+        line_points.push_back(cv::Point2f(peak_x, 0));
+        line_points.push_back(cv::Point2f(peak_x, displayImage.rows));
         
-        // Transform points back to original image coordinates
         std::vector<cv::Point2f> transformed_points;
         cv::transform(line_points, transformed_points, rot_inv);
 
         if (transformed_points.size() == 2) {
-            cv::line(displayImage, transformed_points[0], transformed_points[1], cv::Scalar(0, 255, 0), 1);
+            cv::line(displayImage, transformed_points[0], transformed_points[1], color, thickness);
         }
     }
 }
