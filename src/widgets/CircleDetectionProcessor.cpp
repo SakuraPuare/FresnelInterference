@@ -1,198 +1,135 @@
 #include "CircleDetectionProcessor.h"
 #include <opencv2/imgproc.hpp>
-#include "utils/QtCvUtils.h"
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <numeric>
 
-// CircleDetectionProcessor 实现，负责圆检测与图像预处理
-CircleDetectionProcessor::CircleDetectionProcessor()
-    : m_currentAlgorithm(DetectionAlgorithm::Hough)
-    , m_lastProcessedFrame(-1)
-    , m_paramsChanged(false)
+CircleDetectionProcessor::CircleDetectionProcessor(Algorithm algo)
+    : m_algorithm(algo)
+    , m_threshold(-1) // 默认自动阈值
 {
 }
 
-void CircleDetectionProcessor::setAlgorithm(DetectionAlgorithm algorithm)
+void CircleDetectionProcessor::setAlgorithm(Algorithm algo)
 {
-    if (m_currentAlgorithm != algorithm) {
-        m_currentAlgorithm = algorithm;
-        m_paramsChanged = true;
-    }
+    m_algorithm = algo;
 }
 
-void CircleDetectionProcessor::setParams(const DetectionParams& params)
+CircleDetectionProcessor::Algorithm CircleDetectionProcessor::algorithm() const
 {
-    // 简单比较参数是否发生变化
-    bool changed = (m_params.dp != params.dp ||
-                   m_params.minDist != params.minDist ||
-                   m_params.cannyThresh != params.cannyThresh ||
-                   m_params.centerThresh != params.centerThresh ||
-                   m_params.minRadius != params.minRadius ||
-                   m_params.maxRadius != params.maxRadius ||
-                   m_params.useBinaryPreprocessing != params.useBinaryPreprocessing ||
-                   m_params.binaryThresh != params.binaryThresh ||
-                   m_params.geometricBinaryThresh != params.geometricBinaryThresh ||
-                   m_params.inverseGeometric != params.inverseGeometric);
-    
-    if (changed) {
-        m_params = params;
-        m_paramsChanged = true;
-    }
+    return m_algorithm;
 }
 
-bool CircleDetectionProcessor::needsReprocessing(int frameNumber) const
+void CircleDetectionProcessor::setThreshold(int thresh)
 {
-    return (frameNumber != m_lastProcessedFrame) || m_paramsChanged;
+    m_threshold = thresh;
 }
 
-DetectionResult CircleDetectionProcessor::processFrame(const cv::Mat& inputFrame, int frameNumber, bool forceUpdate)
+int CircleDetectionProcessor::threshold() const
 {
-    DetectionResult result;
-    result.frameNumber = frameNumber;
-    result.originalImage = inputFrame.clone();
-    
-    // 性能优化：如果帧未更新且参数未变化，返回缓存结果
-    if (!forceUpdate && !needsReprocessing(frameNumber)) {
-        result.circles = m_cachedCircles;
-        result.processedImage = m_cachedResult.clone();
-        result.frameUpdated = false;
-        return result;
-    }
-    
-    // 预处理图像
-    cv::Mat processed = preprocessImage(inputFrame);
-    
-    // 转换为灰度图
+    return m_threshold;
+}
+
+CircleDetectionProcessor::Result CircleDetectionProcessor::process(const cv::Mat& frame)
+{
+    Result ret;
+    if (frame.empty()) return ret;
+
     cv::Mat gray;
-    if (processed.channels() == 3) {
-        cv::cvtColor(processed, gray, cv::COLOR_BGR2GRAY);
-    } else {
-        gray = processed.clone();
+    if (frame.channels() == 3)
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    else
+        gray = frame.clone();
+
+    switch (m_algorithm)
+    {
+    case Algorithm::HoughTransform:
+        ret = detectWithHough(gray);
+        break;
+    case Algorithm::GeometricCenter:
+        ret = detectWithGeometric(gray);
+        break;
+    default:
+        ret.valid = false;
+        break;
     }
-    
-    // 根据算法进行检测
+    return ret;
+}
+
+CircleDetectionProcessor::Result CircleDetectionProcessor::detectWithHough(const cv::Mat& gray)
+{
+    Result res;
+    if (gray.empty()) return res;
+
+    // 可选：均值模糊降噪
+    cv::Mat blur;
+    cv::medianBlur(gray, blur, 5);
+
+    // 霍夫变换参数
     std::vector<cv::Vec3f> circles;
-    cv::Mat processedOutput;
-    
-    if (m_currentAlgorithm == DetectionAlgorithm::Hough) {
-        // 根据参数决定是否进行二值化预处理
-        if (m_params.useBinaryPreprocessing) {
-            cv::Mat binary;
-            cv::threshold(gray, binary, m_params.binaryThresh, 255, cv::THRESH_BINARY);
-            gray = binary;
-        }
-        detectWithHough(gray, circles, processedOutput);
-    } else if (m_currentAlgorithm == DetectionAlgorithm::GeometricCenter) {
-        detectWithGeometricCenter(gray, circles, processedOutput);
+    double dp = 1.5;
+    double minDist = gray.rows / 8.0;
+    double param1 = 100; // Canny 高阈值
+    double param2 = 30;  // 累加器阈值
+    int minRadius = 0;
+    int maxRadius = 0;
+
+    cv::HoughCircles(blur, circles, cv::HOUGH_GRADIENT, dp, minDist, param1, param2, minRadius, maxRadius);
+
+    if (!circles.empty())
+    {
+        // 取最大圆
+        auto best = *std::max_element(circles.begin(), circles.end(), [](const cv::Vec3f& a, const cv::Vec3f& b){ return a[2] < b[2]; });
+        res.center = cv::Point2f(best[0], best[1]);
+        res.radius = best[2];
+        res.valid = true;
     }
-    
-    // 在原图和处理图上绘制检测结果
-    cv::Mat origWithCircles = inputFrame.clone();
-    for (const auto& circle : circles) {
-        cv::Point center(cvRound(circle[0]), cvRound(circle[1]));
-        int radius = cvRound(circle[2]);
-        
-        // 在原图上绘制
-        cv::circle(origWithCircles, center, 3, cv::Scalar(0, 255, 0), -1);
-        if (radius > 0) {  // 对于几何中心算法，半径可能为0
-            cv::circle(origWithCircles, center, radius, cv::Scalar(0, 0, 255), 3);
-        } else {
-            // 几何中心算法只绘制十字标记
-            cv::line(origWithCircles, cv::Point(center.x - 10, center.y), cv::Point(center.x + 10, center.y), cv::Scalar(0, 0, 255), 2);
-            cv::line(origWithCircles, cv::Point(center.x, center.y - 10), cv::Point(center.x, center.y + 10), cv::Scalar(0, 0, 255), 2);
-        }
-        
-        // 在处理图上绘制
-        cv::circle(processedOutput, center, 3, cv::Scalar(0, 255, 0), -1);
-        if (radius > 0) {
-            cv::circle(processedOutput, center, radius, cv::Scalar(0, 0, 255), 3);
-        } else {
-            cv::line(processedOutput, cv::Point(center.x - 10, center.y), cv::Point(center.x + 10, center.y), cv::Scalar(0, 0, 255), 2);
-            cv::line(processedOutput, cv::Point(center.x, center.y - 10), cv::Point(center.x, center.y + 10), cv::Scalar(0, 0, 255), 2);
-        }
-    }
-    
-    // 更新缓存
-    m_cachedCircles = circles;
-    m_cachedResult = processedOutput.clone();
-    m_lastProcessedFrame = frameNumber;
-    m_paramsChanged = false;
-    
-    // 填充结果
-    result.circles = circles;
-    result.processedImage = processedOutput;
-    result.originalImage = origWithCircles;
-    result.frameUpdated = true;
-    
-    return result;
+    return res;
 }
 
-cv::Mat CircleDetectionProcessor::preprocessImage(const cv::Mat& input)
+CircleDetectionProcessor::Result CircleDetectionProcessor::detectWithGeometric(const cv::Mat& gray)
 {
-    cv::Mat processed;
-    QtCvUtils::applyPreprocessing(input, processed);
-    return processed;
-}
+    Result res;
+    if (gray.empty()) return res;
 
-void CircleDetectionProcessor::detectWithHough(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& outProcessedImage)
-{
-    // 新增：缩小图像
-    double scale = 0.5;
-    cv::Mat smallGray;
-    cv::resize(gray, smallGray, cv::Size(), scale, scale, cv::INTER_AREA);
-    cv::GaussianBlur(smallGray, smallGray, cv::Size(9, 9), 2, 2);
-
-    std::vector<cv::Vec3f> smallCircles;
-    cv::HoughCircles(smallGray, smallCircles, cv::HOUGH_GRADIENT,
-                     m_params.dp,
-                     m_params.minDist * scale,
-                     m_params.cannyThresh,
-                     m_params.centerThresh,
-                     m_params.minRadius * scale,
-                     m_params.maxRadius * scale);
-
-    // 恢复圆的坐标和半径到原图尺度
-    circles.clear();
-    for (const auto& c : smallCircles) {
-        circles.push_back(cv::Vec3f(c[0] / scale, c[1] / scale, c[2] / scale));
+    cv::Mat bin;
+    int threshVal = m_threshold >= 0 ? m_threshold : 0;
+    if (m_threshold < 0)
+    {
+        // Otsu
+        cv::threshold(gray, bin, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    }
+    else
+    {
+        cv::threshold(gray, bin, threshVal, 255, cv::THRESH_BINARY);
     }
 
-    // 输出处理图像（缩小后转回原尺寸，便于后续绘制）
-    cv::Mat processed;
-    cv::resize(smallGray, processed, gray.size(), 0, 0, cv::INTER_LINEAR);
-    cv::cvtColor(processed, outProcessedImage, cv::COLOR_GRAY2BGR);
-}
+    // 寻找最大轮廓
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-void CircleDetectionProcessor::detectWithGeometricCenter(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& outProcessedImage)
-{
-    cv::Mat binary;
-    int thresh = m_params.geometricBinaryThresh;
-    if (m_params.inverseGeometric) {
-        cv::threshold(gray, binary, thresh, 255, cv::THRESH_BINARY_INV);
-    } else {
-        cv::threshold(gray, binary, thresh, 255, cv::THRESH_BINARY);
-    }
+    if (contours.empty()) return res;
 
-    // 计算白色像素的几何中心
-    cv::Moments moments = cv::moments(binary, true);
-    circles.clear();
-    double centerX = 0, centerY = 0, radius = 0;
-    if (moments.m00 != 0) {
-        centerX = moments.m10 / moments.m00;
-        centerY = moments.m01 / moments.m00;
-        // 计算平均半径
-        std::vector<cv::Point> whitePixels;
-        cv::findNonZero(binary, whitePixels);
-        double sumR = 0;
-        for (const auto& pt : whitePixels) {
-            double dx = pt.x - centerX;
-            double dy = pt.y - centerY;
-            sumR += std::sqrt(dx*dx + dy*dy);
+    // 选择面积最大的
+    size_t bestIdx = 0;
+    double bestArea = 0;
+    for (size_t i = 0; i < contours.size(); ++i)
+    {
+        double area = cv::contourArea(contours[i]);
+        if (area > bestArea)
+        {
+            bestArea = area;
+            bestIdx = i;
         }
-        if (!whitePixels.empty())
-            radius = sumR / whitePixels.size();
-        else
-            radius = 0;
-        circles.push_back(cv::Vec3f(centerX, centerY, radius));
     }
-    // 输出处理图像（显示二值化结果）
-    cv::cvtColor(binary, outProcessedImage, cv::COLOR_GRAY2BGR);
-} 
+    if (bestArea < 10) return res; // too small
+
+    cv::Moments m = cv::moments(contours[bestIdx]);
+    if (m.m00 == 0) return res;
+
+    res.center = cv::Point2f(static_cast<float>(m.m10 / m.m00), static_cast<float>(m.m01 / m.m00));
+    // 用等效圆面积求半径
+    res.radius = std::sqrt(bestArea / CV_PI);
+    res.valid = true;
+    return res;
+}
