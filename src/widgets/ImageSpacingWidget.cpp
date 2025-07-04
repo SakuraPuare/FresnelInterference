@@ -286,6 +286,50 @@ void ImageSpacingWidget::performMeasurement()
         cv::Point2f center1(M1.m10 / M1.m00, M1.m01 / M1.m00);
         cv::Point2f center2(M2.m10 / M2.m00, M2.m01 / M2.m00);
 
+        // === New vertical-line based measurement ===
+        // Fit a line to each contour (approximating vertical edges)
+        cv::Vec4f line1, line2;
+        cv::fitLine(c1, line1, cv::DIST_L2, 0, 0.01, 0.01);
+        cv::fitLine(c2, line2, cv::DIST_L2, 0, 0.01, 0.01);
+        auto getXAtY = [](const cv::Vec4f &line, float y){
+            float vx = line[0], vy = line[1], x0 = line[2], y0 = line[3];
+            if (std::abs(vy) < 1e-6) return static_cast<float>(x0); // avoid div by zero for perfectly horizontal line
+            return x0 + vx / vy * (y - y0);
+        };
+        cv::Rect rect1 = cv::boundingRect(c1);
+        cv::Rect rect2 = cv::boundingRect(c2);
+        int y_start = std::max(rect1.y, rect2.y);
+        int y_end   = std::min(rect1.y + rect1.height, rect2.y + rect2.height);
+        double sumDiff = 0.0;
+        int sampleCnt = 0;
+        if (y_end > y_start) {
+            const int NUM_SAMPLES = 100;
+            for (int i = 0; i < NUM_SAMPLES; ++i) {
+                float y = y_start + (y_end - y_start) * i / static_cast<float>(NUM_SAMPLES - 1);
+                float x1 = getXAtY(line1, y);
+                float x2 = getXAtY(line2, y);
+                sumDiff += std::abs(x2 - x1);
+                ++sampleCnt;
+            }
+        }
+        double avg_dx_px_line = sampleCnt > 0 ? sumDiff / sampleCnt : std::abs(center1.x - center2.x);
+        double avg_dx_um_line = avg_dx_px_line * m_pixelSize_um;
+
+        // Draw fitted lines on display images for visualization
+        auto drawVerticalLine = [&](cv::Mat &img, const cv::Vec4f &line, const cv::Scalar &color){
+            int thickness = std::max(1, img.cols / 300);
+            float vx = line[0], vy = line[1], x0 = line[2], y0 = line[3];
+            // Compute intersection with top (y=0) and bottom (y=img.rows)
+            cv::Point2f pt1(getXAtY(line, 0), 0);
+            cv::Point2f pt2(getXAtY(line, static_cast<float>(img.rows)), static_cast<float>(img.rows));
+            cv::line(img, pt1, pt2, color, thickness);
+        };
+        cv::Scalar lineColor(0,255,0); // Green for vertical lines
+        drawVerticalLine(displayProcessed, line1, lineColor);
+        drawVerticalLine(displayProcessed, line2, lineColor);
+        drawVerticalLine(displayOriginal, line1, lineColor);
+        drawVerticalLine(displayOriginal, line2, lineColor);
+
         double dx_px = std::abs(center1.x - center2.x);
         double dy_px = std::abs(center1.y - center2.y);
         double dist_px = std::sqrt(dx_px * dx_px + dy_px * dy_px);
@@ -303,9 +347,10 @@ void ImageSpacingWidget::performMeasurement()
         result_string.append(QString("中心间距: %1 px (%2 μm)\n").arg(dist_px, 0, 'f', 2).arg(dist_um, 0, 'f', 2));
         result_string.append(QString("水平间距(dX): %1 px (%2 μm)\n").arg(dx_px, 0, 'f', 2).arg(dx_um, 0, 'f', 2));
         result_string.append(QString("垂直间距(dY): %1 px (%2 μm)\n").arg(dy_px, 0, 'f', 2).arg(dy_um, 0, 'f', 2));
+        result_string.append(QString("竖线平均间距: %1 px (%2 μm)\n").arg(avg_dx_px_line, 0, 'f', 2).arg(avg_dx_um_line, 0, 'f', 2));
         result_string.append(QString("连线角度: %1°\n").arg(angle_deg, 0, 'f', 2));
-        
-        // Draw on both original & processed display images
+
+        // Draw on both original & processed display images using centers (optional)
         drawResult(displayProcessed, {center1, center2}, angle_deg);
         drawResult(displayOriginal, {center1, center2}, angle_deg);
     } else {
