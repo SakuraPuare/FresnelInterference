@@ -49,6 +49,13 @@ private:
                     const std::vector<int> &peak_indices,
                     const cv::Mat &projection);
 
+    /**
+     * @brief Estimate the rotation angle to make fringes vertical using projection variance search.
+     * @param gray Grayscale image.
+     * @return Angle in degrees to rotate the image.
+     */
+    static double estimateFringeRotation(const cv::Mat &gray);
+
     // UI Elements
     QLabel* m_originalImageLabel;
     QLabel* m_processedImageLabel;

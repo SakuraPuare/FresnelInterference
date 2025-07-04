@@ -241,80 +241,19 @@ void FringeAnalysisWidget::performAnalysis()
 
     cv::Mat grayFrame = m_currentFrame; // applyPreprocessing已转灰度
 
-    cv::Mat padded;
-    int m = cv::getOptimalDFTSize(grayFrame.rows);
-    int n = cv::getOptimalDFTSize(grayFrame.cols);
-    cv::copyMakeBorder(grayFrame, padded, 0, m - grayFrame.rows, 0, n - grayFrame.cols, cv::BORDER_CONSTANT, cv::Scalar::all(0));
-    
-    cv::Mat planes[] = {cv::Mat_<float>(padded), cv::Mat::zeros(padded.size(), CV_32F)};
-    cv::Mat complexI;
-    cv::merge(planes, 2, complexI);
-    cv::dft(complexI, complexI);
-    cv::split(complexI, planes);
-    cv::magnitude(planes[0], planes[1], planes[0]);
-    cv::Mat magI = planes[0];
-    magI += cv::Scalar::all(1);
-    cv::log(magI, magI);
-    QtCvUtils::fftshift(magI);
-    cv::normalize(magI, magI, 0, 1, cv::NORM_MINMAX);
-
-    // --- Start: Robust Angle Detection using Angular Histogram on FFT Spectrum ---
-    int cx = magI.cols / 2;
-    int cy = magI.rows / 2;
-
-    // 将幅度谱转换为 8bit 便于阈值处理
-    cv::Mat magU8;
-    magI.convertTo(magU8, CV_8U, 255.0);
-
-    // 去除直流分量
-    cv::circle(magU8, cv::Point(cx, cy), 10, cv::Scalar(0), -1);
-
-    double minVal8U = 0.0, maxVal8U = 0.0;
-    cv::minMaxLoc(magU8, &minVal8U, &maxVal8U, nullptr, nullptr);
-
-    std::vector<cv::Point> nonZeroLocs;
-    if (maxVal8U > 0.0) {
-        cv::Mat binary;
-        // 采用相对阈值保留最亮的频率分量
-        cv::threshold(magU8, binary, maxVal8U * 0.6, 255, cv::THRESH_BINARY);
-        cv::findNonZero(binary, nonZeroLocs);
-    }
-
-    double angle_deg = 90.0; // 默认频域方向
-
-    if (!nonZeroLocs.empty()) {
-        // 统计角度直方图 (0-179 度)
-        std::vector<int> angleHist(180, 0);
-        for (const auto& p : nonZeroLocs) {
-            double ang = atan2(static_cast<double>(p.y - cy), static_cast<double>(p.x - cx)) * 180.0 / CV_PI;
-            if (ang < 0.0) ang += 180.0; // 按 180° 对称折叠
-            int bin = static_cast<int>(std::round(ang)) % 180;
-            angleHist[bin]++;
-        }
-        int bestBin = std::distance(angleHist.begin(), std::max_element(angleHist.begin(), angleHist.end()));
-        angle_deg = static_cast<double>(bestBin);
-    }
-    // --- End: Robust Angle Detection ---
-    
-    // Angle of the fringes is perpendicular to the angle in the frequency domain.
-    double fringe_angle_deg = angle_deg - 90.0;
-    
-    // The angle needed to rotate the image to make the fringes vertical
-    double rotation_angle = 90.0 - fringe_angle_deg;
-
-    // Normalize rotation to the shortest path
-    if (rotation_angle > 90.0) rotation_angle -= 180.0;
-    if (rotation_angle < -90.0) rotation_angle += 180.0;
-    
-    // For display, show a user-friendly angle (e.g., 0-180 degrees)
+    // 前置声明（如果函数位于本编译单元稍后位置也可安全解析）
+    double rotation_angle = estimateFringeRotation(grayFrame);
+    double fringe_angle_deg = 90.0 - rotation_angle;
     double display_angle = fringe_angle_deg;
     if (display_angle < 0.0) display_angle += 180.0;
 
+    // 旋转到竖直条纹
     cv::Mat rotatedFrame;
-    cv::Point2f center(grayFrame.cols / 2.0, grayFrame.rows / 2.0);
+    cv::Point2f center(grayFrame.cols / 2.0f, grayFrame.rows / 2.0f);
     cv::Mat rot = cv::getRotationMatrix2D(center, rotation_angle, 1.0);
     cv::warpAffine(grayFrame, rotatedFrame, rot, grayFrame.size(), cv::INTER_CUBIC, cv::BORDER_REPLICATE);
 
+    // 使用旋转后的图像继续后面的投影与峰值检测
     cv::Mat projection;
     cv::reduce(rotatedFrame, projection, 0, cv::REDUCE_AVG, CV_32F);
 
@@ -433,4 +372,47 @@ void FringeAnalysisWidget::drawResult(cv::Mat &displayImage, double angle,
             cv::line(displayImage, transformed_points[0], transformed_points[1], color, thickness);
         }
     }
+}
+
+/**
+ * @brief Estimate the rotation angle to make fringes vertical using projection variance search.
+ * @param gray Grayscale image.
+ * @return Angle in degrees to rotate the image.
+ */
+double FringeAnalysisWidget::estimateFringeRotation(const cv::Mat &gray)
+{
+    CV_Assert(gray.channels() == 1);
+    // Convert to 8-bit for projection calculation
+    cv::Mat gray8;
+    if (gray.depth() != CV_8U) {
+        double minVal, maxVal; cv::minMaxLoc(gray, &minVal, &maxVal);
+        gray.convertTo(gray8, CV_8U, 255.0/(maxVal-minVal+1e-5), -minVal*255.0/(maxVal-minVal+1e-5));
+    } else {
+        gray8 = gray;
+    }
+
+    double bestAngle = 0.0;
+    double bestScore = -1.0;
+
+    for (double ang = -45.0; ang <= 45.0; ang += 1.0) {
+        // Rotate
+        cv::Point2f center(gray8.cols/2.0f, gray8.rows/2.0f);
+        cv::Mat rotMat = cv::getRotationMatrix2D(center, ang, 1.0);
+        cv::Mat rotImg;
+        cv::warpAffine(gray8, rotImg, rotMat, gray8.size(), cv::INTER_LINEAR, cv::BORDER_REPLICATE);
+
+        // Column projection
+        cv::Mat proj;
+        cv::reduce(rotImg, proj, 0, cv::REDUCE_AVG, CV_32F);
+
+        // Standard deviation of projection (larger when fringes are vertical)
+        cv::Scalar mean, stddev;
+        cv::meanStdDev(proj, mean, stddev);
+        double score = stddev[0];
+        if (score > bestScore) {
+            bestScore = score;
+            bestAngle = ang;
+        }
+    }
+    return bestAngle;
 }
