@@ -1,6 +1,8 @@
 #ifndef INPUT_CONTROL_WIDGET_H
 #define INPUT_CONTROL_WIDGET_H
 
+#include "io/MVCameraInput.h"
+
 #include <QWidget>
 #include <QTimer>
 #include <memory>
@@ -8,7 +10,6 @@
 #include <QResizeEvent>
 
 #include "io/ImageInput.h"
-#include "io/MVCameraInput.h"
 #include <opencv2/opencv.hpp>
 #include "utils/QtCvUtils.h"
 

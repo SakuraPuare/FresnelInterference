@@ -315,7 +315,7 @@ void ImageSpacingWidget::performMeasurement()
         double avg_dx_px_line = sampleCnt > 0 ? sumDiff / sampleCnt : std::abs(center1.x - center2.x);
         double avg_dx_um_line = avg_dx_px_line * m_pixelSize_um;
 
-        // Draw fitted lines on display images for visualization
+        // Draw fitted lines on processed image only for visualization
         auto drawVerticalLine = [&](cv::Mat &img, const cv::Vec4f &line, const cv::Scalar &color){
             int thickness = std::max(1, img.cols / 300);
             float vx = line[0], vy = line[1], x0 = line[2], y0 = line[3];
@@ -325,10 +325,9 @@ void ImageSpacingWidget::performMeasurement()
             cv::line(img, pt1, pt2, color, thickness);
         };
         cv::Scalar lineColor(0,255,0); // Green for vertical lines
+        // 只在处理后的图像上绘制竖线，保持原始图像不变
         drawVerticalLine(displayProcessed, line1, lineColor);
         drawVerticalLine(displayProcessed, line2, lineColor);
-        drawVerticalLine(displayOriginal, line1, lineColor);
-        drawVerticalLine(displayOriginal, line2, lineColor);
 
         double dx_px = std::abs(center1.x - center2.x);
         double dy_px = std::abs(center1.y - center2.y);
@@ -350,9 +349,8 @@ void ImageSpacingWidget::performMeasurement()
         result_string.append(QString("竖线平均间距: %1 px (%2 μm)\n").arg(avg_dx_px_line, 0, 'f', 2).arg(avg_dx_um_line, 0, 'f', 2));
         result_string.append(QString("连线角度: %1°\n").arg(angle_deg, 0, 'f', 2));
 
-        // Draw on both original & processed display images using centers (optional)
+        // 只在处理后的图像上绘制结果，保持原始图像不变
         drawResult(displayProcessed, {center1, center2}, angle_deg);
-        drawResult(displayOriginal, {center1, center2}, angle_deg);
     } else {
         result_string = "未能检测到足够的目标（需要至少两个）。";
     }
@@ -388,16 +386,12 @@ void ImageSpacingWidget::performMeasurement()
             contour_results << QString("垂直间距: %1 px (%2 μm)").arg(dy_px, 0, 'f', 2).arg(dy_um, 0, 'f', 2);
             contour_results << QString("加权结果(平均): %1 μm").arg(final_um, 0, 'f', 2);
 
-            // Draw on both display images (red line + circles)
+            // 只在处理后的图像上绘制结果（红线和圆圈），保持原始图像不变
             int thickness = std::max(1, displayProcessed.cols / 300);
             cv::Scalar drawColor(0,0,255);
             cv::line(displayProcessed, center1, center2, drawColor, thickness);
             cv::circle(displayProcessed, center1, 10, drawColor, thickness);
             cv::circle(displayProcessed, center2, 10, drawColor, thickness);
-
-            cv::line(displayOriginal, center1, center2, drawColor, thickness);
-            cv::circle(displayOriginal, center1, 10, drawColor, thickness);
-            cv::circle(displayOriginal, center2, 10, drawColor, thickness);
 
             m_resultText->append(contour_results.join("\n"));
         }

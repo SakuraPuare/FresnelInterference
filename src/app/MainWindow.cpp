@@ -1,5 +1,5 @@
-#include "MainWindow.h"
 #include "widgets/InputControlWidget.h"
+#include "MainWindow.h"
 #include "widgets/CircleDetectionWidget.h"
 #include "widgets/FringeAnalysisWidget.h"
 #include "widgets/ImageSpacingWidget.h"
@@ -11,7 +11,7 @@
 #include <QMessageBox>
 #include <QInputDialog>
 
-// 头文件包含顺序：标准库、第三方库、本项目头文件（如有需要可调整）
+// 头文件包含顺序：第三方库、本项目头文件、标准库
 
 // MainWindow：主窗口实现
 MainWindow::MainWindow(QWidget *parent)

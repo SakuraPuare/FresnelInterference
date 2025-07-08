@@ -307,10 +307,11 @@ void FringeAnalysisWidget::performAnalysis()
     cv::cvtColor(m_frozenFrame, displayOriginal, cv::COLOR_GRAY2BGR, 3);
     cv::cvtColor(rotatedFrame, displayProcessed, cv::COLOR_GRAY2BGR);
     
-    drawResult(displayOriginal, rotation_angle, peak_indices, projection);
+    // 只在处理后的图像上绘制分析结果，保持原始图像不变
     drawResult(displayProcessed, 0, peak_indices, projection); // In rotated, angle is 0
 
     m_currentPixmap = QtCvUtils::matToQPixmap(displayProcessed);
+    // 左边显示原始冻结图像，不含任何标注
     QPixmap originalPixmap = QtCvUtils::matToQPixmap(displayOriginal);
     if (!originalPixmap.isNull()) {
         m_originalImageLabel->setPixmap(originalPixmap.scaled(m_originalImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));

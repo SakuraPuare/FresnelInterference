@@ -400,7 +400,8 @@ void CircleDetectionWidget::processFrame(const cv::Mat& frame)
             }
         }
         // UI刷新（图片和检测结果始终显示，便于调参）
-        QPixmap origPixmap = QtCvUtils::matToQPixmap(result.originalImage).scaled(m_origImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        // 左边显示真正的原始图像，不含任何标注
+        QPixmap origPixmap = QtCvUtils::matToQPixmap(frame).scaled(m_origImageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
         QPixmap procPixmap = QtCvUtils::matToQPixmap(result.processedImage).scaled(m_imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
         QString resultText = QString("检测到 %1 个目标:\n").arg(result.circles.size());
         for (size_t i = 0; i < result.circles.size(); ++i) {

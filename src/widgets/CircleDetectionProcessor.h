@@ -120,7 +120,7 @@ private:
     cv::Mat preprocessImage(const cv::Mat& input);
     void convertToGray(const cv::Mat& input, cv::Mat& gray);
     void performDetection(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& processedOutput);
-    void drawDetectionResults(const std::vector<cv::Vec3f>& circles, cv::Mat& originalImage, cv::Mat& processedImage);
+    void drawDetectionResults(const std::vector<cv::Vec3f>& circles, cv::Mat& processedImage);
     void updateCache(const std::vector<cv::Vec3f>& circles, const cv::Mat& processedImage, int frameNumber);
     double calculateRadiusUsingRayMethod(const cv::Mat& binary, double centerX, double centerY);
     

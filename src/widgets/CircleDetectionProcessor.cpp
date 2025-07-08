@@ -88,9 +88,8 @@ DetectionResult CircleDetectionProcessor::processFrame(const cv::Mat& inputFrame
         
         performDetection(gray, circles, processedOutput);
         
-        // 绘制检测结果
-        cv::Mat origWithCircles = inputFrame.clone();
-        drawDetectionResults(circles, origWithCircles, processedOutput);
+        // 绘制检测结果（仅在处理图像上）
+        drawDetectionResults(circles, processedOutput);
         
         // 更新缓存
         updateCache(circles, processedOutput, frameNumber);
@@ -98,7 +97,7 @@ DetectionResult CircleDetectionProcessor::processFrame(const cv::Mat& inputFrame
         // 填充结果
         result.circles = circles;
         result.processedImage = processedOutput;
-        result.originalImage = origWithCircles;
+        result.originalImage = inputFrame.clone();  // 保持原始图像不变
         result.frameUpdated = true;
         
     } catch (const cv::Exception& e) {
@@ -143,7 +142,7 @@ void CircleDetectionProcessor::performDetection(const cv::Mat& gray, std::vector
     }
 }
 
-void CircleDetectionProcessor::drawDetectionResults(const std::vector<cv::Vec3f>& circles, cv::Mat& originalImage, cv::Mat& processedImage)
+void CircleDetectionProcessor::drawDetectionResults(const std::vector<cv::Vec3f>& circles, cv::Mat& processedImage)
 {
     constexpr int CROSS_SIZE = 10;
     constexpr int CIRCLE_THICKNESS = 3;
@@ -156,27 +155,12 @@ void CircleDetectionProcessor::drawDetectionResults(const std::vector<cv::Vec3f>
         const cv::Point center(cvRound(circle[0]), cvRound(circle[1]));
         const int radius = cvRound(circle[2]);
         
-        // 在原图上绘制
-        cv::circle(originalImage, center, CENTER_RADIUS, CENTER_COLOR, -1);
-        if (radius > 0) {
-            cv::circle(originalImage, center, radius, CIRCLE_COLOR, CIRCLE_THICKNESS);
-        } else {
-            // 几何中心算法绘制十字标记
-            cv::line(originalImage, 
-                    cv::Point(center.x - CROSS_SIZE, center.y), 
-                    cv::Point(center.x + CROSS_SIZE, center.y), 
-                    CIRCLE_COLOR, 2);
-            cv::line(originalImage, 
-                    cv::Point(center.x, center.y - CROSS_SIZE), 
-                    cv::Point(center.x, center.y + CROSS_SIZE), 
-                    CIRCLE_COLOR, 2);
-        }
-        
-        // 在处理图上绘制
+        // 只在处理图上绘制检测结果
         cv::circle(processedImage, center, CENTER_RADIUS, CENTER_COLOR, -1);
         if (radius > 0) {
             cv::circle(processedImage, center, radius, CIRCLE_COLOR, CIRCLE_THICKNESS);
         } else {
+            // 几何中心算法绘制十字标记
             cv::line(processedImage, 
                     cv::Point(center.x - CROSS_SIZE, center.y), 
                     cv::Point(center.x + CROSS_SIZE, center.y), 
