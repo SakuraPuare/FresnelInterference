@@ -1,5 +1,10 @@
 #include "CircleDetectionWidget.h"
 
+// 标准 C++ 头文件
+#include <utility>
+#include <memory>
+
+// Qt 核心头文件
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFormLayout>
@@ -8,26 +13,27 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QTextEdit>
-#include <QDebug>
-#include <utility>
 #include <QTabWidget>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QStackedWidget>
+#include <QDebug>
 
+// Qt Charts 头文件
 #include <QtCharts/QChart>
 #include <QtCharts/QValueAxis>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QScatterSeries>
 
-#include <opencv2/imgproc.hpp>
-#include "io/FrameManager.h"
-#include "AnalysisModule.h"
+// Qt 并发头文件
 #include <QtConcurrent/QtConcurrent>
 
-// 头文件包含顺序：标准库、第三方库、本项目头文件（如有需要可调整）
+// 第三方库头文件
+#include <opencv2/imgproc.hpp>
 
-// CircleDetectionWidget：圆检测主界面
+// 本项目头文件
+#include "io/FrameManager.h"
+#include "AnalysisModule.h"
 CircleDetectionWidget::CircleDetectionWidget(QWidget *parent)
     : QWidget(parent)
     , m_isDetectionActive(false)
@@ -36,29 +42,55 @@ CircleDetectionWidget::CircleDetectionWidget(QWidget *parent)
     , m_frameCounter(0)
 {
     setupUI();
-
-    // 初始化算法选择
-    m_algorithmSelector->setCurrentIndex(0); // 默认选择Hough算法
-    m_paramsStack->setCurrentIndex(0);
-    
-    // 初始化处理器参数
+    initializeAlgorithm();
     updateProcessorParams();
 }
 
 void CircleDetectionWidget::setupUI()
 {
-    QHBoxLayout* mainLayout = new QHBoxLayout(this);
+    auto* mainLayout = new QHBoxLayout(this);
     setupDisplayLayout(mainLayout);
     setupControlLayout(mainLayout);
     makeConnections();
 }
 
-void CircleDetectionWidget::setupDisplayLayout(QHBoxLayout* mainLayout) {
-    QVBoxLayout* displayLayout = new QVBoxLayout();
+void CircleDetectionWidget::initializeAlgorithm()
+{
+    if (m_algorithmSelector) {
+        m_algorithmSelector->setCurrentIndex(0);
+    }
+    if (m_paramsStack) {
+        m_paramsStack->setCurrentIndex(0);
+    }
+}
+
+void CircleDetectionWidget::setupDisplayLayout(QHBoxLayout* mainLayout)
+{
+    auto* displayLayout = new QVBoxLayout();
     
-    QHBoxLayout* imageRowLayout = new QHBoxLayout();
-    QGroupBox* origGroup = new QGroupBox("原始图像");
-    QVBoxLayout* origLayout = new QVBoxLayout(origGroup);
+    // 设置图像显示区域
+    setupImageDisplayArea(displayLayout);
+    
+    // 设置结果文本区域
+    setupResultTextArea(displayLayout);
+    
+    // 设置图表显示区域
+    setupChartArea(displayLayout);
+    
+    // 设置布局比例
+    displayLayout->setStretchFactor(displayLayout->itemAt(0)->widget(), 1);
+    displayLayout->setStretchFactor(displayLayout->itemAt(2)->widget(), 1);
+    
+    mainLayout->addLayout(displayLayout, 2);
+}
+
+void CircleDetectionWidget::setupImageDisplayArea(QVBoxLayout* displayLayout)
+{
+    auto* imageRowLayout = new QHBoxLayout();
+    
+    // 原始图像显示区域
+    auto* origGroup = new QGroupBox("原始图像");
+    auto* origLayout = new QVBoxLayout(origGroup);
     m_origImageLabel = new QLabel("等待输入图像...");
     m_origImageLabel->setMinimumSize(320, 240);
     m_origImageLabel->setFrameStyle(QFrame::Box);
@@ -66,105 +98,159 @@ void CircleDetectionWidget::setupDisplayLayout(QHBoxLayout* mainLayout) {
     origLayout->addWidget(m_origImageLabel);
     imageRowLayout->addWidget(origGroup);
     
-    QGroupBox* imageGroup = new QGroupBox("处理后检测结果");
-    QVBoxLayout* imageLayout = new QVBoxLayout(imageGroup);
+    // 处理后图像显示区域
+    auto* imageGroup = new QGroupBox("处理后检测结果");
+    auto* imageLayout = new QVBoxLayout(imageGroup);
     m_imageLabel = new QLabel("等待输入图像...");
     m_imageLabel->setMinimumSize(320, 240);
     m_imageLabel->setFrameStyle(QFrame::Box);
     m_imageLabel->setAlignment(Qt::AlignCenter);
     imageLayout->addWidget(m_imageLabel);
     imageRowLayout->addWidget(imageGroup);
+    
     displayLayout->addLayout(imageRowLayout);
+}
 
+void CircleDetectionWidget::setupResultTextArea(QVBoxLayout* displayLayout)
+{
     m_resultText = new QTextEdit();
     m_resultText->setMaximumHeight(100);
     m_resultText->setReadOnly(true);
     m_resultText->setStyleSheet("QTextEdit { background-color: #1e1e1e; color: #00ff00; }");
     displayLayout->addWidget(m_resultText);
+}
 
-    // Plotting Area
-    QHBoxLayout* plotsLayout = new QHBoxLayout();
-    QChart *chartX = new QChart();
+void CircleDetectionWidget::setupChartArea(QVBoxLayout* displayLayout)
+{
+    auto* plotsLayout = new QHBoxLayout();
+    
+    // X坐标与半径关系图
+    setupXChart(plotsLayout);
+    
+    // Y坐标与半径关系图
+    setupYChart(plotsLayout);
+    
+    displayLayout->addLayout(plotsLayout);
+}
+
+void CircleDetectionWidget::setupXChart(QHBoxLayout* plotsLayout)
+{
+    auto* chartX = new QChart();
     chartX->setTitle("圆心X坐标 vs. 半径");
     m_plotViewX = new QChartView(chartX);
     m_plotViewX->setRenderHint(QPainter::Antialiasing);
+    
     m_axisX_R = new QValueAxis();
     m_axisX_R->setTitleText("半径 (像素)");
     m_axisX_R->setRange(0, 100);
     chartX->addAxis(m_axisX_R, Qt::AlignBottom);
+    
     m_axisX_X = new QValueAxis();
     m_axisX_X->setTitleText("X坐标 (像素)");
     m_axisX_X->setRange(0, 640);
     chartX->addAxis(m_axisX_X, Qt::AlignLeft);
-    plotsLayout->addWidget(m_plotViewX);
     
-    QChart *chartY = new QChart();
+    plotsLayout->addWidget(m_plotViewX);
+}
+
+void CircleDetectionWidget::setupYChart(QHBoxLayout* plotsLayout)
+{
+    auto* chartY = new QChart();
     chartY->setTitle("圆心Y坐标 vs. 半径");
     m_plotViewY = new QChartView(chartY);
     m_plotViewY->setRenderHint(QPainter::Antialiasing);
+    
     m_axisY_R = new QValueAxis();
     m_axisY_R->setTitleText("半径 (像素)");
     m_axisY_R->setRange(0, 100);
     chartY->addAxis(m_axisY_R, Qt::AlignBottom);
+    
     m_axisY_Y = new QValueAxis();
     m_axisY_Y->setTitleText("Y坐标 (像素)");
     m_axisY_Y->setRange(0, 480);
     chartY->addAxis(m_axisY_Y, Qt::AlignLeft);
-    plotsLayout->addWidget(m_plotViewY);
     
-    displayLayout->addLayout(plotsLayout);
-    displayLayout->setStretchFactor(imageRowLayout, 1);
-    displayLayout->setStretchFactor(plotsLayout, 1);
-    mainLayout->addLayout(displayLayout, 2);
+    plotsLayout->addWidget(m_plotViewY);
 }
 
-void CircleDetectionWidget::setupControlLayout(QHBoxLayout* mainLayout) {
-    QVBoxLayout* controlLayout = new QVBoxLayout();
+void CircleDetectionWidget::setupControlLayout(QHBoxLayout* mainLayout)
+{
+    auto* controlLayout = new QVBoxLayout();
     
-    // --- Start/Stop Controls ---
-    QGroupBox* controlGroup = new QGroupBox("检测控制");
-    QVBoxLayout* controlGroupLayout = new QVBoxLayout(controlGroup);
+    // 检测控制区域
+    setupDetectionControls(controlLayout);
+    
+    // 算法选择区域
+    setupAlgorithmSelection(controlLayout);
+    
+    // 参数调整区域
+    setupParameterWidgets(controlLayout);
+    
+    // 记录控制区域
+    setupRecordingControls(controlLayout);
+    
+    // 分析建议区域
+    setupAnalysisSuggestions(controlLayout);
+    
+    controlLayout->addStretch();
+    mainLayout->addLayout(controlLayout, 1);
+}
+
+void CircleDetectionWidget::setupDetectionControls(QVBoxLayout* controlLayout)
+{
+    auto* controlGroup = new QGroupBox("检测控制");
+    auto* controlGroupLayout = new QVBoxLayout(controlGroup);
+    
     m_startButton = new QPushButton("开始检测");
     m_stopButton = new QPushButton("停止检测");
     m_stopButton->setEnabled(false);
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    
+    auto* buttonLayout = new QHBoxLayout();
     buttonLayout->addWidget(m_startButton);
     buttonLayout->addWidget(m_stopButton);
     controlGroupLayout->addLayout(buttonLayout);
+    
     controlLayout->addWidget(controlGroup);
+}
 
-    // --- Algorithm Selection ---
-    QGroupBox* algoGroup = new QGroupBox("算法选择");
-    QVBoxLayout* algoLayout = new QVBoxLayout(algoGroup);
+void CircleDetectionWidget::setupAlgorithmSelection(QVBoxLayout* controlLayout)
+{
+    auto* algoGroup = new QGroupBox("算法选择");
+    auto* algoLayout = new QVBoxLayout(algoGroup);
+    
     m_algorithmSelector = new QComboBox();
     m_algorithmSelector->addItem("Hough圆检测", QVariant::fromValue(DetectionAlgorithm::Hough));
     m_algorithmSelector->addItem("几何中心检测", QVariant::fromValue(DetectionAlgorithm::GeometricCenter));
     algoLayout->addWidget(m_algorithmSelector);
-    controlLayout->addWidget(algoGroup);
     
-    // --- Algorithm Parameters ---
-    setupParameterWidgets(controlLayout);
+    controlLayout->addWidget(algoGroup);
+}
 
-    // --- Record Controls ---
+void CircleDetectionWidget::setupRecordingControls(QVBoxLayout* controlLayout)
+{
     m_recordGroup = new QGroupBox("记录控制");
-    QVBoxLayout* recordLayout = new QVBoxLayout(m_recordGroup);
+    auto* recordLayout = new QVBoxLayout(m_recordGroup);
+    
     m_startRecordButton = new QPushButton("开始记录");
     m_clearRecordButton = new QPushButton("清除记录");
+    
     recordLayout->addWidget(m_startRecordButton);
     recordLayout->addWidget(m_clearRecordButton);
+    
     controlLayout->addWidget(m_recordGroup);
+}
 
-    // --- Analysis Suggestions ---
+void CircleDetectionWidget::setupAnalysisSuggestions(QVBoxLayout* controlLayout)
+{
     m_analysisGroup = new QGroupBox("分析建议");
-    QVBoxLayout* analysisLayout = new QVBoxLayout(m_analysisGroup);
+    auto* analysisLayout = new QVBoxLayout(m_analysisGroup);
+    
     m_suggestionText = new QTextEdit();
     m_suggestionText->setReadOnly(true);
     m_suggestionText->setMinimumHeight(80);
+    
     analysisLayout->addWidget(m_suggestionText);
     controlLayout->addWidget(m_analysisGroup);
-    
-    controlLayout->addStretch();
-    mainLayout->addLayout(controlLayout, 1);
 }
 
 void CircleDetectionWidget::setupParameterWidgets(QVBoxLayout* controlLayout) {
@@ -207,17 +293,19 @@ void CircleDetectionWidget::setupParameterWidgets(QVBoxLayout* controlLayout) {
     m_useBinaryCheckBox->setChecked(false);
     houghParamsLayout->addRow(m_useBinaryCheckBox);
     
-    QHBoxLayout* binaryLayout = new QHBoxLayout();
+    // Create a container widget for the binary threshold controls
+    m_binaryControlsWidget = new QWidget();
+    QHBoxLayout* binaryLayout = new QHBoxLayout(m_binaryControlsWidget);
+    binaryLayout->setContentsMargins(0, 0, 0, 0);
     m_binaryThreshSlider = new QSlider(Qt::Horizontal);
     m_binaryThreshSlider->setRange(0, 255); m_binaryThreshSlider->setValue(128);
     m_binaryThreshValueLabel = new QLabel(QString::number(m_binaryThreshSlider->value()));
     m_binaryThreshValueLabel->setMinimumWidth(40);
     binaryLayout->addWidget(m_binaryThreshSlider);
     binaryLayout->addWidget(m_binaryThreshValueLabel);
-    houghParamsLayout->addRow("二值化阈值:", binaryLayout);
+    houghParamsLayout->addRow("二值化阈值:", m_binaryControlsWidget);
     
-    QWidget* binaryWidget = binaryLayout->parentWidget();
-    binaryWidget->setEnabled(false);
+    m_binaryControlsWidget->setEnabled(false);
 
     connect(m_binaryThreshSlider, &QSlider::valueChanged, m_binaryThreshValueLabel, qOverload<int>(&QLabel::setNum));
     
@@ -270,8 +358,7 @@ void CircleDetectionWidget::makeConnections() {
     connect(m_binaryThreshSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::onParamsChanged);
 
     // Also connect the checkbox to enable/disable the binary threshold slider's container
-    QWidget* binaryWidget = m_binaryThreshSlider->parentWidget();
-    connect(m_useBinaryCheckBox, &QCheckBox::toggled, binaryWidget, &QWidget::setEnabled);
+    connect(m_useBinaryCheckBox, &QCheckBox::toggled, m_binaryControlsWidget, &QWidget::setEnabled);
     
     // Geometric center param controls
     connect(m_geometricBinaryThreshSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::onParamsChanged);

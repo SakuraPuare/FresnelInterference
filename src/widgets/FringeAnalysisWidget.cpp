@@ -394,7 +394,7 @@ double FringeAnalysisWidget::estimateFringeRotation(const cv::Mat &gray)
     double bestAngle = 0.0;
     double bestScore = -1.0;
 
-    for (double ang = -45.0; ang <= 45.0; ang += 1.0) {
+    for (double ang = -45.0; ang <= 45.0; ang += 0.5) {
         // Rotate
         cv::Point2f center(gray8.cols/2.0f, gray8.rows/2.0f);
         cv::Mat rotMat = cv::getRotationMatrix2D(center, ang, 1.0);

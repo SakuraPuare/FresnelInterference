@@ -1,24 +1,30 @@
 #ifndef CIRCLE_DETECTION_WIDGET_H
 #define CIRCLE_DETECTION_WIDGET_H
 
+// 标准 C++ 头文件
+#include <memory>
+
+// Qt 核心头文件
 #include <QWidget>
 #include <QPixmap>
 #include <QResizeEvent>
-#include "AnalysisModule.h"
-#include "utils/QtCvUtils.h"
+#include <QList>
+#include <QPointF>
+#include <QColor>
 
-// --- Begin Qt ---
+// Qt Charts 头文件
 #include <QtCharts/QChartView>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QValueAxis>
 #include <QtCharts/QScatterSeries>
-#include <QList>
-#include <QPointF>
-#include <QColor>
-// --- End Qt ---
 
+// 第三方库头文件
 #include <opencv2/opencv.hpp>
+
+// 本项目头文件
+#include "AnalysisModule.h"
 #include "CircleDetectionProcessor.h"
+#include "utils/QtCvUtils.h"
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -37,24 +43,49 @@ class QHBoxLayout;
 class QVBoxLayout;
 QT_END_NAMESPACE
 
+/**
+ * @brief 圆检测界面组件
+ * 
+ * 提供圆检测功能的完整用户界面，包括算法选择、参数调整、
+ * 实时检测、数据记录和分析建议等功能。
+ */
 class CircleDetectionWidget : public QWidget
 {
     Q_OBJECT
 
 public:
+    /**
+     * @brief 支持的检测算法类型
+     */
     enum class DetectionAlgorithm {
-        Hough,
-        GeometricCenter
+        Hough,          ///< Hough 圆检测算法
+        GeometricCenter ///< 几何中心检测算法
     };
     Q_ENUM(DetectionAlgorithm)
 
+    /**
+     * @brief 构造函数
+     * @param parent 父窗口指针
+     */
     explicit CircleDetectionWidget(QWidget *parent = nullptr);
+    
+    /**
+     * @brief 析构函数
+     */
     ~CircleDetectionWidget() override = default;
 
 public slots:
+    /**
+     * @brief 处理输入的图像帧
+     * @param frame 输入的 OpenCV 图像
+     */
     void processFrame(const cv::Mat& frame);
 
 signals:
+    /**
+     * @brief 发送日志消息信号
+     * @param message 日志消息内容
+     */
     void logMessage(const QString& message);
 
 private slots:
@@ -69,18 +100,26 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
-    // UI Setup refactored methods
+    // UI 初始化方法
     void setupUI();
+    void initializeAlgorithm();
     void setupDisplayLayout(QHBoxLayout* mainLayout);
+    void setupImageDisplayArea(QVBoxLayout* displayLayout);
+    void setupResultTextArea(QVBoxLayout* displayLayout);
+    void setupChartArea(QVBoxLayout* displayLayout);
+    void setupXChart(QHBoxLayout* plotsLayout);
+    void setupYChart(QHBoxLayout* plotsLayout);
     void setupControlLayout(QHBoxLayout* mainLayout);
+    void setupDetectionControls(QVBoxLayout* controlLayout);
+    void setupAlgorithmSelection(QVBoxLayout* controlLayout);
+    void setupRecordingControls(QVBoxLayout* controlLayout);
+    void setupAnalysisSuggestions(QVBoxLayout* controlLayout);
     void setupParameterWidgets(QVBoxLayout* controlLayout);
     void makeConnections();
 
-    // Helper methods
+    // 辅助方法
     void updateAnalysisAndSuggestions();
     void matchAndTrackCircles(const std::vector<cv::Vec3f>& newCircles);
-    
-    // 更新参数到处理器
     void updateProcessorParams();
     void updateTable();
     void updateAdvice();
@@ -113,6 +152,7 @@ private:
     QCheckBox* m_useBinaryCheckBox;
     QSlider* m_binaryThreshSlider;
     QLabel* m_binaryThreshValueLabel;
+    QWidget* m_binaryControlsWidget;
     
     // --- Geometric Center Algorithm Parameters ---
     QGroupBox* m_geometricParamsGroup;
@@ -123,23 +163,16 @@ private:
     // --- Plotting Axes ---
     QValueAxis *m_axisX_R, *m_axisX_X, *m_axisY_R, *m_axisY_Y;
 
-    // --- State ---
+    // --- 状态变量 ---
     bool m_isDetectionActive;
     bool m_isRecording;
     cv::Mat m_originalFrame;
     QPixmap m_currentPixmap;
     DetectionAlgorithm m_currentAlgorithm;
-    
-    // 检测处理器模块
-    CircleDetectionProcessor m_processor;
     int m_frameCounter;
-
-    // --- Tracking ---
-    // struct CircleData { double x, y, radius; };
-    // struct TrackedObject { ... };
-    // QMap<int, TrackedObject> m_trackedObjects;
-    // int m_nextTrackId;
-    // QList<QColor> m_colorPalette;
+    
+    // --- 核心模块 ---
+    CircleDetectionProcessor m_processor;
     AnalysisModule m_analysisModule;
 };
 
