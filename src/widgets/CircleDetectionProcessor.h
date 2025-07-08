@@ -1,42 +1,79 @@
-#pragma once
+#ifndef CIRCLE_DETECTION_PROCESSOR_H
+#define CIRCLE_DETECTION_PROCESSOR_H
 
-#include <opencv2/core.hpp>
 #include <vector>
+#include <opencv2/opencv.hpp>
 
-// CircleDetectionProcessor：负责从图像中检测圆形光源并给出圆心与半径
+// CircleDetectionProcessor：圆检测处理器，支持多种算法
+
+enum class DetectionAlgorithm {
+    Hough,
+    GeometricCenter
+};
+
+struct DetectionParams {
+    // Hough参数
+    double dp = 1.0;
+    int minDist = 50;
+    int cannyThresh = 100;
+    int centerThresh = 30;
+    int minRadius = 10;
+    int maxRadius = 100;
+    
+    // 二值化预处理开关和参数（用于Hough）
+    bool useBinaryPreprocessing = false;
+    int binaryThresh = 128;
+    
+    // 几何中心算法参数
+    int geometricBinaryThresh = 128;
+    bool inverseGeometric = false;  // 是否反向二值化
+};
+
+struct DetectionResult {
+    std::vector<cv::Vec3f> circles;
+    cv::Mat processedImage;
+    cv::Mat originalImage;
+    bool frameUpdated = false;
+    int frameNumber = 0;
+};
+
 class CircleDetectionProcessor
 {
 public:
-    enum class Algorithm
-    {
-        HoughTransform = 0,   // 使用 HoughCircles
-        GeometricCenter       // 二值化后取最大连通域的几何中心
-    };
+    CircleDetectionProcessor();
+    ~CircleDetectionProcessor() = default;
 
-    struct Result
-    {
-        bool valid = false;           // 是否检测成功
-        cv::Point2f center;          // 圆心坐标（像素）
-        float radius = 0.0f;         // 半径（像素）
-    };
-
-    CircleDetectionProcessor(Algorithm algo = Algorithm::HoughTransform);
-
-    // 设置使用的检测算法
-    void setAlgorithm(Algorithm algo);
-    Algorithm algorithm() const;
-
-    // 设置二值化阈值，<0 表示使用 Otsu 自动阈值
-    void setThreshold(int thresh);
-    int threshold() const;
-
-    // 主处理入口：输入 BGR 或灰度图像，返回检测结果
-    Result process(const cv::Mat& frame);
+    // 设置检测参数
+    void setAlgorithm(DetectionAlgorithm algorithm);
+    void setParams(const DetectionParams& params);
+    
+    // 主要检测接口
+    DetectionResult processFrame(const cv::Mat& inputFrame, int frameNumber, bool forceUpdate = false);
+    
+    // 性能优化：检查是否需要重新处理
+    bool needsReprocessing(int frameNumber) const;
+    
+    // 获取当前状态
+    DetectionAlgorithm getCurrentAlgorithm() const { return m_currentAlgorithm; }
+    const DetectionParams& getCurrentParams() const { return m_params; }
 
 private:
-    Result detectWithHough(const cv::Mat& gray);
-    Result detectWithGeometric(const cv::Mat& gray);
-
-    Algorithm m_algorithm;
-    int m_threshold; // 0-255，<0 使用 Otsu
+    // 检测算法模块
+    void detectWithHough(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& outProcessedImage);
+    void detectWithGeometricCenter(const cv::Mat& gray, std::vector<cv::Vec3f>& circles, cv::Mat& outProcessedImage);
+    
+    // 图像预处理
+    cv::Mat preprocessImage(const cv::Mat& input);
+    
+    // 成员变量
+    DetectionAlgorithm m_currentAlgorithm;
+    DetectionParams m_params;
+    
+    // 缓存和性能优化
+    int m_lastProcessedFrame;
+    bool m_paramsChanged;
+    cv::Mat m_cachedResult;
+    std::vector<cv::Vec3f> m_cachedCircles;
 };
+
+#endif // CIRCLE_DETECTION_PROCESSOR_H 
