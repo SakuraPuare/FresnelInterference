@@ -84,13 +84,17 @@ add_executable(FresnelInterference
 )
 
 # 链接库
+if(WIN32)
+    target_link_libraries(FresnelInterference MVCAMSDK_X64)
+else()
+    target_link_libraries(FresnelInterference MVSDK)
+endif()
 target_link_libraries(FresnelInterference
     Qt6::Core
     Qt6::Widgets
     Qt6::Gui
     Qt6::Charts
     ${OpenCV_LIBS}
-    MVSDK  # MindVision相机SDK
 )
 
 # 设置编译器特定选项
@@ -119,13 +123,16 @@ add_executable(camera_test
 
 target_link_libraries(camera_test
     ${OpenCV_LIBS}
-    MVSDK
 )
 
 if(WIN32)
+    target_link_libraries(camera_test MVCAMSDK_X64)
     target_link_libraries(camera_test winmm)
 elseif(UNIX AND NOT APPLE)
+    target_link_libraries(camera_test MVSDK)
     target_link_libraries(camera_test pthread dl)
+else()
+    target_link_libraries(camera_test MVSDK)
 endif()
 
 # 相机标定程序
@@ -137,11 +144,14 @@ add_executable(camera_calib
 
 target_link_libraries(camera_calib
     ${OpenCV_LIBS}
-    MVSDK
 )
 
 if(WIN32)
+    target_link_libraries(camera_calib MVCAMSDK_X64)
     target_link_libraries(camera_calib winmm)
 elseif(UNIX AND NOT APPLE)
+    target_link_libraries(camera_calib MVSDK)
     target_link_libraries(camera_calib pthread dl)
+else()
+    target_link_libraries(camera_calib MVSDK)
 endif()
