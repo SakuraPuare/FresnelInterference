@@ -46,6 +46,7 @@ public:
     // 设置检测参数
     void setAlgorithm(DetectionAlgorithm algorithm);
     void setParams(const DetectionParams& params);
+    void clearCache();
     
     // 主要检测接口
     DetectionResult processFrame(const cv::Mat& inputFrame, int frameNumber, bool forceUpdate = false);

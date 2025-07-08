@@ -8,6 +8,7 @@
 // AnalysisModule 实现，负责分析点轨迹、拟合与建议生成
 AnalysisModule::AnalysisModule()
     : m_nextTrackId(0)
+    , m_needsFiltering(true)
 {
     m_colorPalette << Qt::cyan << Qt::magenta << Qt::yellow << Qt::green << Qt::red << Qt::blue;
 }
@@ -16,6 +17,9 @@ void AnalysisModule::clear()
 {
     m_tracks.clear();
     m_nextTrackId = 0;
+    m_points.clear();
+    m_filteredPoints.clear();
+    m_needsFiltering = true;
 }
 
 void AnalysisModule::addFramePoints(const std::vector<AnalysisPoint>& points)
@@ -126,32 +130,66 @@ QList<AnalysisTrack> AnalysisModule::getTracks() const
 
 QString AnalysisModule::getMoveAdvice() const
 {
-    if (m_tracks.size() < 2) return "数据不足，无法给出建议。";
+    auto points = filterPoints();
+    // 需要足够的数据点来做有意义的拟合
+    if (points.size() < 5) {
+        return "<p style='color: yellow;'>数据点不足 (少于5个), 无法给出可靠建议。<br>请开始记录并确保能稳定检测到多个圆环。</p>";
+    }
+
     auto fitX = fitXR();
     auto fitY = fitYR();
-    QString advice;
-    if (fitX) {
-        double kx = fitX->first;
-        if (std::abs(kx) > 1e-3) {
-            advice += (kx > 0) ? "光源前移，x随r增大" : "光源后移，x随r减小";
-        } else {
-            advice += "x与r关系不明显";
-        }
+
+    if (!fitX || !fitY) {
+        return "<p style='color: red;'>线性拟合失败，无法生成建议。</p>";
     }
-    advice += "\n";
-    if (fitY) {
-        double ky = fitY->first;
-        if (std::abs(ky) > 1e-3) {
-            advice += (ky > 0) ? "光源上移，y随r增大" : "光源下移，y随r减小";
-        } else {
-            advice += "y与r关系不明显";
-        }
+
+    double kx = fitX->first;
+    double ky = fitY->first;
+    const double threshold = 0.05; // 斜率阈值，用于判断是否需要调整
+
+    QString advice_x, advice_y;
+    QString color_x, color_y;
+
+    // --- 水平方向建议 ---
+    if (std::abs(kx) < threshold) {
+        advice_x = "水平方向已对准。";
+        color_x = "green";
+    } else if (kx > threshold) {
+        advice_x = "请将光源向 <b>左</b> 移动。";
+        color_x = "orange";
+    } else { // kx < -threshold
+        advice_x = "请将光源向 <b>右</b> 移动。";
+        color_x = "orange";
     }
-    return advice;
+
+    // --- 垂直方向建议 ---
+    if (std::abs(ky) < threshold) {
+        advice_y = "垂直方向已对准。";
+        color_y = "green";
+    } else if (ky > threshold) {
+        // y in image coordinates increases downwards
+        advice_y = "请将光源向 <b>上</b> 移动。";
+        color_y = "orange";
+    } else { // ky < -threshold
+        advice_y = "请将光源向 <b>下</b> 移动。";
+        color_y = "orange";
+    }
+    
+    QString finalAdvice = QString(
+        "<p><b>对准建议:</b></p>"
+        "<ul>"
+        "<li><span style='color: %1;'>%2</span> (X-R斜率: %3)</li>"
+        "<li><span style='color: %4;'>%5</span> (Y-R斜率: %6)</li>"
+        "</ul>"
+    ).arg(color_x).arg(advice_x).arg(kx, 0, 'f', 3)
+     .arg(color_y).arg(advice_y).arg(ky, 0, 'f', 3);
+
+    return finalAdvice;
 }
 
 void AnalysisModule::addPoint(double x, double y, double r) {
     m_points.emplace_back(x, y, r);
+    m_needsFiltering = true;
 }
 
 int AnalysisModule::getPointCount() const {
@@ -159,20 +197,66 @@ int AnalysisModule::getPointCount() const {
 }
 
 std::vector<std::tuple<double, double, double>> AnalysisModule::getPoints() const {
-    return m_points;
+    return filterPoints();
+}
+
+std::vector<std::tuple<double, double, double>> AnalysisModule::filterPoints() const {
+    if (!m_needsFiltering) {
+        return m_filteredPoints;
+    }
+
+    if (m_points.size() < 5) { // 数据太少不进行过滤
+        m_filteredPoints = m_points;
+        m_needsFiltering = false;
+        return m_filteredPoints;
+    }
+
+    std::vector<double> xs, ys, rs;
+    for (const auto& p : m_points) {
+        xs.push_back(std::get<0>(p));
+        ys.push_back(std::get<1>(p));
+        rs.push_back(std::get<2>(p));
+    }
+
+    auto calculate_bounds = [](std::vector<double>& data) {
+        std::sort(data.begin(), data.end());
+        double q1 = data[data.size() * 0.25];
+        double q3 = data[data.size() * 0.75];
+        double iqr = q3 - q1;
+        return std::make_pair(q1 - 1.5 * iqr, q3 + 1.5 * iqr);
+    };
+
+    auto x_bounds = calculate_bounds(xs);
+    auto y_bounds = calculate_bounds(ys);
+    auto r_bounds = calculate_bounds(rs);
+
+    m_filteredPoints.clear();
+    for (const auto& p : m_points) {
+        if (std::get<0>(p) >= x_bounds.first && std::get<0>(p) <= x_bounds.second &&
+            std::get<1>(p) >= y_bounds.first && std::get<1>(p) <= y_bounds.second &&
+            std::get<2>(p) >= r_bounds.first && std::get<2>(p) <= r_bounds.second)
+        {
+            m_filteredPoints.push_back(p);
+        }
+    }
+    
+    m_needsFiltering = false;
+    return m_filteredPoints;
 }
 
 std::optional<std::pair<double, double>> AnalysisModule::fitXR() const {
+    auto points = filterPoints();
     std::vector<std::pair<double, double>> data;
-    for (const auto& [x, y, r] : m_points) {
+    for (const auto& [x, y, r] : points) {
         data.emplace_back(r, x);
     }
     return QtCvUtils::linearFit(data);
 }
 
 std::optional<std::pair<double, double>> AnalysisModule::fitYR() const {
+    auto points = filterPoints();
     std::vector<std::pair<double, double>> data;
-    for (const auto& [x, y, r] : m_points) {
+    for (const auto& [x, y, r] : points) {
         data.emplace_back(r, y);
     }
     return QtCvUtils::linearFit(data);

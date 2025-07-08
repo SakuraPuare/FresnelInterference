@@ -33,6 +33,8 @@ class QValueAxis;
 class QCheckBox;
 class QComboBox;
 class QStackedWidget;
+class QHBoxLayout;
+class QVBoxLayout;
 QT_END_NAMESPACE
 
 class CircleDetectionWidget : public QWidget
@@ -49,8 +51,6 @@ public:
     explicit CircleDetectionWidget(QWidget *parent = nullptr);
     ~CircleDetectionWidget() override = default;
 
-    void setStaticImageSource(bool isStatic) { m_isStaticImageSource = isStatic; }
-
 public slots:
     void processFrame(const cv::Mat& frame);
 
@@ -62,7 +62,6 @@ private slots:
     void stopDetection();
     void startRecording();
     void clearRecording();
-    void updateStaticImageOffset(int);
     void onParamsChanged();
     void onAlgorithmChanged(int index);
 
@@ -70,12 +69,16 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
-    // Setup and Helper methods
+    // UI Setup refactored methods
     void setupUI();
-    void updatePlotsAxes();
+    void setupDisplayLayout(QHBoxLayout* mainLayout);
+    void setupControlLayout(QHBoxLayout* mainLayout);
+    void setupParameterWidgets(QVBoxLayout* controlLayout);
+    void makeConnections();
+
+    // Helper methods
     void updateAnalysisAndSuggestions();
     void matchAndTrackCircles(const std::vector<cv::Vec3f>& newCircles);
-    void applyOffsetAndDetect();
     
     // 更新参数到处理器
     void updateProcessorParams();
@@ -103,19 +106,19 @@ private:
     
     // --- Hough Algorithm Parameters ---
     QGroupBox* m_houghParamsGroup;
-    QSlider *m_dpSlider, *m_minDistSlider, *m_cannyThreshSlider, *m_centerThreshSlider, *m_minRadiusSlider, *m_maxRadiusSlider;
+    QSlider *m_dpSlider, *m_minDistSlider, *m_cannyThreshSlider, *m_centerThreshSlider, *m_minRadiusSlider,
+            *m_maxRadiusSlider;
+    QLabel *m_dpValueLabel, *m_minDistValueLabel, *m_cannyThreshValueLabel, *m_centerThreshValueLabel,
+           *m_minRadiusValueLabel, *m_maxRadiusValueLabel;
     QCheckBox* m_useBinaryCheckBox;
     QSlider* m_binaryThreshSlider;
+    QLabel* m_binaryThreshValueLabel;
     
     // --- Geometric Center Algorithm Parameters ---
     QGroupBox* m_geometricParamsGroup;
     QSlider* m_geometricBinaryThreshSlider;
+    QLabel* m_geometricBinaryThreshValueLabel;
     QCheckBox* m_inverseGeometricCheckBox;
-
-    // --- Test Controls ---
-    QGroupBox* m_testGroup;
-    QSlider *m_offsetXSlider, *m_offsetYSlider, *m_zoomSlider;
-    QLabel *m_offsetLabel, *m_zoomLabel;
 
     // --- Plotting Axes ---
     QValueAxis *m_axisX_R, *m_axisX_X, *m_axisY_R, *m_axisY_Y;
@@ -125,7 +128,6 @@ private:
     bool m_isRecording;
     cv::Mat m_originalFrame;
     QPixmap m_currentPixmap;
-    QPoint m_staticImageOffset;
     DetectionAlgorithm m_currentAlgorithm;
     
     // 检测处理器模块
@@ -139,8 +141,6 @@ private:
     // int m_nextTrackId;
     // QList<QColor> m_colorPalette;
     AnalysisModule m_analysisModule;
-    // 静态图像源标志
-    bool m_isStaticImageSource;
 };
 
 #endif // CIRCLEDETECTIONWIDGET_H 

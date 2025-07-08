@@ -10,6 +10,14 @@ CircleDetectionProcessor::CircleDetectionProcessor()
 {
 }
 
+void CircleDetectionProcessor::clearCache()
+{
+    m_lastProcessedFrame = -1;
+    m_cachedCircles.clear();
+    m_cachedResult.release();
+    m_paramsChanged = true;
+}
+
 void CircleDetectionProcessor::setAlgorithm(DetectionAlgorithm algorithm)
 {
     if (m_currentAlgorithm != algorithm) {
@@ -178,19 +186,37 @@ void CircleDetectionProcessor::detectWithGeometricCenter(const cv::Mat& gray, st
     if (moments.m00 != 0) {
         centerX = moments.m10 / moments.m00;
         centerY = moments.m01 / moments.m00;
-        // 计算平均半径
-        std::vector<cv::Point> whitePixels;
-        cv::findNonZero(binary, whitePixels);
+        // 修改为射线法计算平均半径
+        const int num_samples = 72; // 采样角度的数量
         double sumR = 0;
-        for (const auto& pt : whitePixels) {
-            double dx = pt.x - centerX;
-            double dy = pt.y - centerY;
-            sumR += std::sqrt(dx*dx + dy*dy);
+        int countR = 0;
+
+        for (int i = 0; i < num_samples; ++i) {
+            double angle = 2 * CV_PI * i / num_samples;
+            // 沿着射线向外搜索
+            for (double r = 1.0; ; r += 1.0) {
+                int x = cvRound(centerX + r * std::cos(angle));
+                int y = cvRound(centerY + r * std::sin(angle));
+
+                // 检查边界
+                if (x < 0 || x >= binary.cols || y < 0 || y >= binary.rows) {
+                    break; // 超出边界
+                }
+
+                // 检查像素值，遇到黑色像素停止
+                if (binary.at<uchar>(y, x) == 0) {
+                    sumR += r;
+                    countR++;
+                    break; // 找到边界
+                }
+            }
         }
-        if (!whitePixels.empty())
-            radius = sumR / whitePixels.size();
-        else
-            radius = 0;
+        
+        if (countR > 0) {
+            radius = sumR / countR;
+        } else {
+            radius = 0; // 未找到边界点
+        }
         circles.push_back(cv::Vec3f(centerX, centerY, radius));
     }
     // 输出处理图像（显示二值化结果）

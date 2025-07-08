@@ -32,10 +32,8 @@ CircleDetectionWidget::CircleDetectionWidget(QWidget *parent)
     : QWidget(parent)
     , m_isDetectionActive(false)
     , m_isRecording(false)
-    , m_staticImageOffset(0,0)
     , m_currentAlgorithm(DetectionAlgorithm::Hough)
     , m_frameCounter(0)
-    , m_isStaticImageSource(false)
 {
     setupUI();
 
@@ -50,8 +48,12 @@ CircleDetectionWidget::CircleDetectionWidget(QWidget *parent)
 void CircleDetectionWidget::setupUI()
 {
     QHBoxLayout* mainLayout = new QHBoxLayout(this);
-    
-    // Left side: Image and Plot
+    setupDisplayLayout(mainLayout);
+    setupControlLayout(mainLayout);
+    makeConnections();
+}
+
+void CircleDetectionWidget::setupDisplayLayout(QHBoxLayout* mainLayout) {
     QVBoxLayout* displayLayout = new QVBoxLayout();
     
     QHBoxLayout* imageRowLayout = new QHBoxLayout();
@@ -80,7 +82,7 @@ void CircleDetectionWidget::setupUI()
     m_resultText->setStyleSheet("QTextEdit { background-color: #1e1e1e; color: #00ff00; }");
     displayLayout->addWidget(m_resultText);
 
-    // Plotting Area (remains the same)
+    // Plotting Area
     QHBoxLayout* plotsLayout = new QHBoxLayout();
     QChart *chartX = new QChart();
     chartX->setTitle("圆心X坐标 vs. 半径");
@@ -114,8 +116,9 @@ void CircleDetectionWidget::setupUI()
     displayLayout->setStretchFactor(imageRowLayout, 1);
     displayLayout->setStretchFactor(plotsLayout, 1);
     mainLayout->addLayout(displayLayout, 2);
-    
-    // Right side: Control Panel
+}
+
+void CircleDetectionWidget::setupControlLayout(QHBoxLayout* mainLayout) {
     QVBoxLayout* controlLayout = new QVBoxLayout();
     
     // --- Start/Stop Controls ---
@@ -139,72 +142,8 @@ void CircleDetectionWidget::setupUI()
     algoLayout->addWidget(m_algorithmSelector);
     controlLayout->addWidget(algoGroup);
     
-    // --- Algorithm Parameters Stack ---
-    m_paramsStack = new QStackedWidget();
-    
-    // Hough Parameters
-    m_houghParamsWidget = new QWidget();
-    m_houghParamsGroup = new QGroupBox("Hough算法参数");
-    QFormLayout* houghParamsLayout = new QFormLayout(m_houghParamsGroup);
-    
-    m_dpSlider = new QSlider(Qt::Horizontal);
-    m_dpSlider->setRange(10, 50); m_dpSlider->setValue(10);
-    houghParamsLayout->addRow("DP (x0.1):", m_dpSlider);
-    
-    m_minDistSlider = new QSlider(Qt::Horizontal);
-    m_minDistSlider->setRange(10, 200); m_minDistSlider->setValue(50);
-    houghParamsLayout->addRow("最小距离:", m_minDistSlider);
-    
-    m_cannyThreshSlider = new QSlider(Qt::Horizontal);
-    m_cannyThreshSlider->setRange(10, 300); m_cannyThreshSlider->setValue(100);
-    houghParamsLayout->addRow("Canny阈值:", m_cannyThreshSlider);
-    
-    m_centerThreshSlider = new QSlider(Qt::Horizontal);
-    m_centerThreshSlider->setRange(10, 100); m_centerThreshSlider->setValue(30);
-    houghParamsLayout->addRow("中心阈值:", m_centerThreshSlider);
-    
-    m_minRadiusSlider = new QSlider(Qt::Horizontal);
-    m_minRadiusSlider->setRange(1, 100); m_minRadiusSlider->setValue(10);
-    houghParamsLayout->addRow("最小半径:", m_minRadiusSlider);
-    
-    m_maxRadiusSlider = new QSlider(Qt::Horizontal);
-    m_maxRadiusSlider->setRange(10, 300); m_maxRadiusSlider->setValue(100);
-    houghParamsLayout->addRow("最大半径:", m_maxRadiusSlider);
-    
-    // 二值化预处理选项
-    m_useBinaryCheckBox = new QCheckBox("使用二值化预处理");
-    m_useBinaryCheckBox->setChecked(false);
-    houghParamsLayout->addRow(m_useBinaryCheckBox);
-    
-    m_binaryThreshSlider = new QSlider(Qt::Horizontal);
-    m_binaryThreshSlider->setRange(0, 255); m_binaryThreshSlider->setValue(128);
-    m_binaryThreshSlider->setEnabled(false); // 默认禁用
-    houghParamsLayout->addRow("二值化阈值:", m_binaryThreshSlider);
-    
-    QVBoxLayout* houghWidgetLayout = new QVBoxLayout(m_houghParamsWidget);
-    houghWidgetLayout->addWidget(m_houghParamsGroup);
-    houghWidgetLayout->setContentsMargins(0,0,0,0);
-    m_paramsStack->addWidget(m_houghParamsWidget);
-
-    // Geometric Center Parameters
-    m_geometricParamsWidget = new QWidget();
-    m_geometricParamsGroup = new QGroupBox("几何中心算法参数");
-    QFormLayout* geometricParamsLayout = new QFormLayout(m_geometricParamsGroup);
-    
-    m_geometricBinaryThreshSlider = new QSlider(Qt::Horizontal);
-    m_geometricBinaryThreshSlider->setRange(0, 255); m_geometricBinaryThreshSlider->setValue(128);
-    geometricParamsLayout->addRow("二值化阈值:", m_geometricBinaryThreshSlider);
-    
-    m_inverseGeometricCheckBox = new QCheckBox("反向二值化");
-    m_inverseGeometricCheckBox->setChecked(false);
-    geometricParamsLayout->addRow(m_inverseGeometricCheckBox);
-    
-    QVBoxLayout* geometricWidgetLayout = new QVBoxLayout(m_geometricParamsWidget);
-    geometricWidgetLayout->addWidget(m_geometricParamsGroup);
-    geometricWidgetLayout->setContentsMargins(0,0,0,0);
-    m_paramsStack->addWidget(m_geometricParamsWidget);
-
-    controlLayout->addWidget(m_paramsStack);
+    // --- Algorithm Parameters ---
+    setupParameterWidgets(controlLayout);
 
     // --- Record Controls ---
     m_recordGroup = new QGroupBox("记录控制");
@@ -215,24 +154,6 @@ void CircleDetectionWidget::setupUI()
     recordLayout->addWidget(m_clearRecordButton);
     controlLayout->addWidget(m_recordGroup);
 
-    // --- Test Controls ---
-    m_testGroup = new QGroupBox("静态图像测试");
-    QFormLayout* testLayout = new QFormLayout(m_testGroup);
-    m_offsetXSlider = new QSlider(Qt::Horizontal);
-    m_offsetXSlider->setRange(-100, 100); m_offsetXSlider->setValue(0);
-    testLayout->addRow("X 漂移方向:", m_offsetXSlider);
-    m_offsetYSlider = new QSlider(Qt::Horizontal);
-    m_offsetYSlider->setRange(-100, 100); m_offsetYSlider->setValue(0);
-    testLayout->addRow("Y 漂移方向:", m_offsetYSlider);
-    m_offsetLabel = new QLabel("漂移方向: (0, 0)");
-    testLayout->addWidget(m_offsetLabel);
-    m_zoomSlider = new QSlider(Qt::Horizontal);
-    m_zoomSlider->setRange(100, 300); m_zoomSlider->setValue(100);
-    testLayout->addRow("缩放/漂移:", m_zoomSlider);
-    m_zoomLabel = new QLabel("缩放: 1.00x");
-    testLayout->addWidget(m_zoomLabel);
-    controlLayout->addWidget(m_testGroup);
-    
     // --- Analysis Suggestions ---
     m_analysisGroup = new QGroupBox("分析建议");
     QVBoxLayout* analysisLayout = new QVBoxLayout(m_analysisGroup);
@@ -244,8 +165,96 @@ void CircleDetectionWidget::setupUI()
     
     controlLayout->addStretch();
     mainLayout->addLayout(controlLayout, 1);
+}
+
+void CircleDetectionWidget::setupParameterWidgets(QVBoxLayout* controlLayout) {
+    m_paramsStack = new QStackedWidget();
     
-    // Connections
+    // Hough Parameters
+    m_houghParamsWidget = new QWidget();
+    m_houghParamsGroup = new QGroupBox("Hough算法参数");
+    QFormLayout* houghParamsLayout = new QFormLayout(m_houghParamsGroup);
+    
+    // Helper lambda to create a slider with a label
+    auto createSliderWithLabel = [&](QSlider* &slider, QLabel* &label, const QString& name, int min, int max, int val, double factor = 1.0, int precision = 0) {
+        QHBoxLayout* hLayout = new QHBoxLayout();
+        slider = new QSlider(Qt::Horizontal);
+        slider->setRange(min, max);
+        slider->setValue(val);
+
+        QString labelText = (factor == 1.0) ? QString::number(val) : QString::number(val * factor, 'f', precision);
+        label = new QLabel(labelText);
+        label->setMinimumWidth(40); // For alignment
+
+        hLayout->addWidget(slider);
+        hLayout->addWidget(label);
+        houghParamsLayout->addRow(name, hLayout);
+
+        connect(slider, &QSlider::valueChanged, this, [=](int newValue) {
+            QString newLabelText = (factor == 1.0) ? QString::number(newValue) : QString::number(newValue * factor, 'f', precision);
+            label->setText(newLabelText);
+        });
+    };
+
+    createSliderWithLabel(m_dpSlider, m_dpValueLabel, "DP (x0.1):", 10, 50, 10, 0.1, 1);
+    createSliderWithLabel(m_minDistSlider, m_minDistValueLabel, "最小距离:", 10, 200, 50);
+    createSliderWithLabel(m_cannyThreshSlider, m_cannyThreshValueLabel, "Canny阈值:", 10, 300, 100);
+    createSliderWithLabel(m_centerThreshSlider, m_centerThreshValueLabel, "中心阈值:", 10, 100, 30);
+    createSliderWithLabel(m_minRadiusSlider, m_minRadiusValueLabel, "最小半径:", 1, 100, 10);
+    createSliderWithLabel(m_maxRadiusSlider, m_maxRadiusValueLabel, "最大半径:", 10, 300, 100);
+    
+    m_useBinaryCheckBox = new QCheckBox("使用二值化预处理");
+    m_useBinaryCheckBox->setChecked(false);
+    houghParamsLayout->addRow(m_useBinaryCheckBox);
+    
+    QHBoxLayout* binaryLayout = new QHBoxLayout();
+    m_binaryThreshSlider = new QSlider(Qt::Horizontal);
+    m_binaryThreshSlider->setRange(0, 255); m_binaryThreshSlider->setValue(128);
+    m_binaryThreshValueLabel = new QLabel(QString::number(m_binaryThreshSlider->value()));
+    m_binaryThreshValueLabel->setMinimumWidth(40);
+    binaryLayout->addWidget(m_binaryThreshSlider);
+    binaryLayout->addWidget(m_binaryThreshValueLabel);
+    houghParamsLayout->addRow("二值化阈值:", binaryLayout);
+    
+    QWidget* binaryWidget = binaryLayout->parentWidget();
+    binaryWidget->setEnabled(false);
+
+    connect(m_binaryThreshSlider, &QSlider::valueChanged, m_binaryThreshValueLabel, qOverload<int>(&QLabel::setNum));
+    
+    QVBoxLayout* houghWidgetLayout = new QVBoxLayout(m_houghParamsWidget);
+    houghWidgetLayout->addWidget(m_houghParamsGroup);
+    houghWidgetLayout->setContentsMargins(0,0,0,0);
+    m_paramsStack->addWidget(m_houghParamsWidget);
+
+    // Geometric Center Parameters
+    m_geometricParamsWidget = new QWidget();
+    m_geometricParamsGroup = new QGroupBox("几何中心算法参数");
+    QFormLayout* geometricParamsLayout = new QFormLayout(m_geometricParamsGroup);
+    
+    QHBoxLayout* geometricBinaryLayout = new QHBoxLayout();
+    m_geometricBinaryThreshSlider = new QSlider(Qt::Horizontal);
+    m_geometricBinaryThreshSlider->setRange(0, 255); m_geometricBinaryThreshSlider->setValue(128);
+    m_geometricBinaryThreshValueLabel = new QLabel(QString::number(m_geometricBinaryThreshSlider->value()));
+    m_geometricBinaryThreshValueLabel->setMinimumWidth(40);
+    geometricBinaryLayout->addWidget(m_geometricBinaryThreshSlider);
+    geometricBinaryLayout->addWidget(m_geometricBinaryThreshValueLabel);
+    geometricParamsLayout->addRow("二值化阈值:", geometricBinaryLayout);
+
+    connect(m_geometricBinaryThreshSlider, &QSlider::valueChanged, m_geometricBinaryThreshValueLabel, qOverload<int>(&QLabel::setNum));
+
+    m_inverseGeometricCheckBox = new QCheckBox("反向二值化");
+    m_inverseGeometricCheckBox->setChecked(false);
+    geometricParamsLayout->addRow(m_inverseGeometricCheckBox);
+    
+    QVBoxLayout* geometricWidgetLayout = new QVBoxLayout(m_geometricParamsWidget);
+    geometricWidgetLayout->addWidget(m_geometricParamsGroup);
+    geometricWidgetLayout->setContentsMargins(0,0,0,0);
+    m_paramsStack->addWidget(m_geometricParamsWidget);
+
+    controlLayout->addWidget(m_paramsStack);
+}
+
+void CircleDetectionWidget::makeConnections() {
     connect(m_startButton, &QPushButton::clicked, this, &CircleDetectionWidget::startDetection);
     connect(m_stopButton, &QPushButton::clicked, this, &CircleDetectionWidget::stopDetection);
     connect(m_algorithmSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &CircleDetectionWidget::onAlgorithmChanged);
@@ -258,8 +267,11 @@ void CircleDetectionWidget::setupUI()
     connect(m_minRadiusSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::onParamsChanged);
     connect(m_maxRadiusSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::onParamsChanged);
     connect(m_useBinaryCheckBox, &QCheckBox::toggled, this, &CircleDetectionWidget::onParamsChanged);
-    connect(m_useBinaryCheckBox, &QCheckBox::toggled, m_binaryThreshSlider, &QSlider::setEnabled);
     connect(m_binaryThreshSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::onParamsChanged);
+
+    // Also connect the checkbox to enable/disable the binary threshold slider's container
+    QWidget* binaryWidget = m_binaryThreshSlider->parentWidget();
+    connect(m_useBinaryCheckBox, &QCheckBox::toggled, binaryWidget, &QWidget::setEnabled);
     
     // Geometric center param controls
     connect(m_geometricBinaryThreshSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::onParamsChanged);
@@ -267,10 +279,6 @@ void CircleDetectionWidget::setupUI()
 
     connect(m_startRecordButton, &QPushButton::clicked, this, &CircleDetectionWidget::startRecording);
     connect(m_clearRecordButton, &QPushButton::clicked, this, &CircleDetectionWidget::clearRecording);
-    
-    connect(m_offsetXSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::updateStaticImageOffset);
-    connect(m_offsetYSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::updateStaticImageOffset);
-    connect(m_zoomSlider, &QSlider::valueChanged, this, &CircleDetectionWidget::updateStaticImageOffset);
 }
 
 void CircleDetectionWidget::resizeEvent(QResizeEvent* event)
@@ -283,6 +291,7 @@ void CircleDetectionWidget::resizeEvent(QResizeEvent* event)
 
 void CircleDetectionWidget::processFrame(const cv::Mat& frame)
 {
+    if (!m_isDetectionActive) return;
     if (frame.empty()) return;
     m_originalFrame = frame.clone();
     m_frameCounter++;
@@ -363,44 +372,35 @@ void CircleDetectionWidget::startRecording()
 
 void CircleDetectionWidget::clearRecording()
 {
+    m_isRecording = false;
+    if (m_startRecordButton) m_startRecordButton->setText("开始记录");
     m_analysisModule.clear();
+    
+    // 清除处理器缓存，防止旧的检测结果被重新添加
+    m_processor.clearCache();
+
     m_suggestionText->clear();
     m_resultText->clear();
     m_origImageLabel->clear();
     m_imageLabel->clear();
-    updateChartTracks();
+
+    // Directly clear charts and reset axes
+    m_plotViewX->chart()->removeAllSeries();
+    m_plotViewY->chart()->removeAllSeries();
+    m_axisX_R->setRange(0, 100);
+    m_axisX_X->setRange(0, m_originalFrame.cols > 0 ? m_originalFrame.cols : 640);
+    m_axisY_R->setRange(0, 100);
+    m_axisY_Y->setRange(0, m_originalFrame.rows > 0 ? m_originalFrame.rows : 480);
+
     emit logMessage("所有记录、图表、建议和显示内容已清除");
-}
-
-void CircleDetectionWidget::updateStaticImageOffset(int)
-{
-    int x = m_offsetXSlider->value();
-    int y = m_offsetYSlider->value();
-    m_staticImageOffset.setX(x);
-    m_staticImageOffset.setY(y);
-    m_offsetLabel->setText(QString("漂移方向: (%1, %2)").arg(x).arg(y));
-
-    double scale = m_zoomSlider->value() / 100.0;
-    m_zoomLabel->setText(QString("缩放: %1x").arg(scale, 0, 'f', 2));
-
-    // 判断是否为静态图像（静态图像时才允许平移/缩放）
-    if (!m_originalFrame.empty() && m_isDetectionActive && m_isStaticImageSource) {
-        // 对原始静态图像做仿射变换
-        cv::Mat modifiedFrame;
-        cv::Point2f center(m_originalFrame.cols / 2.0f, m_originalFrame.rows / 2.0f);
-        cv::Mat rotMatrix = cv::getRotationMatrix2D(center, 0, scale);
-        rotMatrix.at<double>(0, 2) += x;
-        rotMatrix.at<double>(1, 2) += y;
-        cv::warpAffine(m_originalFrame, modifiedFrame, rotMatrix, m_originalFrame.size());
-        processFrame(modifiedFrame); // 送入变换后的帧
-    }
 }
 
 void CircleDetectionWidget::onParamsChanged()
 {
     updateProcessorParams();
     
-    if (m_isDetectionActive) {
+    if (m_isDetectionActive && !m_originalFrame.empty()) {
+        processFrame(m_originalFrame);
     }
 }
 
@@ -422,7 +422,8 @@ void CircleDetectionWidget::onAlgorithmChanged(int index)
     emit logMessage(QString("切换检测算法为: %1").arg(m_algorithmSelector->currentText()));
     
     // 强制重新检测
-    if (m_isDetectionActive) {
+    if (m_isDetectionActive && !m_originalFrame.empty()) {
+        processFrame(m_originalFrame);
     }
 }
 
@@ -465,15 +466,26 @@ void CircleDetectionWidget::updateChartTracks()
     auto chartY = m_plotViewY->chart();
     chartX->removeAllSeries();
     chartY->removeAllSeries();
-    // 批量添加点，性能优化
+
     const auto& points = m_analysisModule.getPoints();
+
+    if (points.empty()) {
+        // Reset axes to default when there's no data
+        m_axisX_R->setRange(0, 100);
+        m_axisX_X->setRange(0, m_originalFrame.cols > 0 ? m_originalFrame.cols : 640);
+        m_axisY_R->setRange(0, 100);
+        m_axisY_Y->setRange(0, m_originalFrame.rows > 0 ? m_originalFrame.rows : 480);
+        return;
+    }
+
+    // 批量添加点，性能优化
     if (!points.empty()) {
         QScatterSeries* seriesX = new QScatterSeries();
         QScatterSeries* seriesY = new QScatterSeries();
         seriesX->setName("x-r");
         seriesY->setName("y-r");
-        seriesX->setMarkerSize(6.0);
-        seriesY->setMarkerSize(6.0);
+        seriesX->setMarkerSize(10.0);
+        seriesY->setMarkerSize(10.0);
         QVector<QPointF> batchX, batchY;
         batchX.reserve(points.size());
         batchY.reserve(points.size());
@@ -489,6 +501,32 @@ void CircleDetectionWidget::updateChartTracks()
         seriesX->attachAxis(m_axisX_X);
         seriesY->attachAxis(m_axisY_R);
         seriesY->attachAxis(m_axisY_Y);
+
+        // Update axes ranges based on data
+        double minR = std::numeric_limits<double>::max();
+        double maxR = std::numeric_limits<double>::min();
+        double minX = std::numeric_limits<double>::max();
+        double maxX = std::numeric_limits<double>::min();
+        double minY = std::numeric_limits<double>::max();
+        double maxY = std::numeric_limits<double>::min();
+
+        for (const auto& p : points) {
+            minR = std::min(minR, std::get<2>(p));
+            maxR = std::max(maxR, std::get<2>(p));
+            minX = std::min(minX, std::get<0>(p));
+            maxX = std::max(maxX, std::get<0>(p));
+            minY = std::min(minY, std::get<1>(p));
+            maxY = std::max(maxY, std::get<1>(p));
+        }
+
+        double rMargin = (maxR - minR) * 0.1;
+        double xMargin = (maxX - minX) * 0.1;
+        double yMargin = (maxY - minY) * 0.1;
+
+        m_axisX_R->setRange(minR - rMargin, maxR + rMargin);
+        m_axisX_X->setRange(minX - xMargin, maxX + xMargin);
+        m_axisY_R->setRange(minR - rMargin, maxR + rMargin);
+        m_axisY_Y->setRange(minY - yMargin, maxY + yMargin);
     }
     // 拟合直线
     auto fitX = m_analysisModule.fitXR();

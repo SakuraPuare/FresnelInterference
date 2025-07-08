@@ -48,10 +48,14 @@ public:
     QList<AnalysisTrack> getTracks() const;
 
 private:
+    std::vector<std::tuple<double, double, double>> filterPoints() const;
+
     QList<AnalysisTrack> m_tracks;
     int m_nextTrackId;
     QList<QColor> m_colorPalette;
     std::vector<std::tuple<double, double, double>> m_points; // x, y, r
+    mutable std::vector<std::tuple<double, double, double>> m_filteredPoints;
+    mutable bool m_needsFiltering;
 };
 
 #endif // ANALYSIS_MODULE_H 
