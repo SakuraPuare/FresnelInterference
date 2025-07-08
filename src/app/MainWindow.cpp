@@ -17,7 +17,7 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_tabWidget(nullptr)
-    , m_pixelSize_um(3.45) // Default pixel size in micrometers
+    , m_pixelSize_um(2.2) // Default pixel size in micrometers
 {
     setupUI();
     setupMenuBar();

@@ -24,7 +24,7 @@
 // FringeAnalysisWidget：干涉条纹分析主界面
 FringeAnalysisWidget::FringeAnalysisWidget(QWidget *parent)
     : QWidget(parent)
-    , m_pixelSize_um(3.45) // Default value
+    , m_pixelSize_um(2.2) // Default value
     , m_isFrozenForAnalysis(false)
 {
     setupUI();

@@ -22,7 +22,7 @@
 ImageSpacingWidget::ImageSpacingWidget(QWidget *parent)
     : QWidget(parent)
     , m_isFrozenForAnalysis(false)
-    , m_pixelSize_um(3.45)
+    , m_pixelSize_um(2.2)
 {
     setupUI();
     
