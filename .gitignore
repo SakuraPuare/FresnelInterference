@@ -191,3 +191,7 @@ compile_commands.json
 
 bin/
 .qt/
+
+.cmake
+.idea
+build.ninja
