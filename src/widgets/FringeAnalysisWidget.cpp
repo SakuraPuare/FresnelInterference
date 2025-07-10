@@ -275,23 +275,32 @@ void FringeAnalysisWidget::performAnalysis()
     m_resultsTable->setRowCount(0); // Clear previous results
 
     if (peak_indices.size() > 1) {
-        std::vector<double> spacings;
+        // --- 使用“首末条纹法”进行修正，以提高物理测量精度 ---
+        // 1. 计算第一条与最后一条条纹之间的总距离
+        double total_distance_px = peak_indices.back() - peak_indices.front();
+        // 2. 计算总共有多少个间距
+        int num_spacings = peak_indices.size() - 1;
+        // 3. 计算平均间距
+        double avg_spacing_px = (num_spacings > 0) ? (total_distance_px / num_spacings) : 0.0;
+        
+        // 保留原始的逐个间距计算，用于在表格中显示，供用户参考
+        std::vector<double> individual_spacings;
         for (size_t i = 1; i < peak_indices.size(); ++i) {
-            spacings.push_back(peak_indices[i] - peak_indices[i-1]);
+            individual_spacings.push_back(peak_indices[i] - peak_indices[i-1]);
         }
-        double avg_spacing_px = std::accumulate(spacings.begin(), spacings.end(), 0.0) / spacings.size();
+        
         double avg_spacing_um = avg_spacing_px * m_pixelSize_um;
         
         results << QString("检测到 %1 条条纹").arg(peak_indices.size());
-        results << QString("平均间距: %1 px  (%2 μm)").arg(avg_spacing_px, 0, 'f', 2).arg(avg_spacing_um, 0, 'f', 2);
+        results << QString("平均间距 (首末法): %1 px  (%2 μm)").arg(avg_spacing_px, 0, 'f', 2).arg(avg_spacing_um, 0, 'f', 2);
 
-        // Populate table
+        // Populate table - 表格中依然显示相邻间距，供详细分析
         m_resultsTable->setRowCount(peak_indices.size());
         for (size_t i = 0; i < peak_indices.size(); ++i) {
             m_resultsTable->setItem(i, 0, new QTableWidgetItem(QString::number(i + 1)));
             m_resultsTable->setItem(i, 1, new QTableWidgetItem(QString::number(peak_indices[i])));
             if (i > 0) {
-                m_resultsTable->setItem(i, 2, new QTableWidgetItem(QString::number(spacings[i-1])));
+                m_resultsTable->setItem(i, 2, new QTableWidgetItem(QString::number(individual_spacings[i-1])));
             } else {
                 m_resultsTable->setItem(i, 2, new QTableWidgetItem("N/A"));
             }
